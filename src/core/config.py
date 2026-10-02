@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     webhook_secret: str = Field(default_factory=lambda: secrets.token_urlsafe(32), validation_alias="WEBHOOK_SECRET")
 
     @property
+    def bot_token(self) -> str:
+        return self.telegram_token
+
+    @property
+    def google_api_key(self) -> str:
+        return self.google_token
+
+    @property
     def BOT_TOKEN(self) -> str:
         return self.telegram_token
 
