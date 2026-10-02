@@ -216,6 +216,7 @@ class FamilyService:
             return group, None, "Вы уже состоите в этой семейной группе."
 
         # If user is in an existing single-member solo group, detach gracefully
+        old_group = None
         if user.family_group_id:
             old_group = await self.session.get(FamilyGroup, user.family_group_id)
             if old_group:
@@ -224,10 +225,13 @@ class FamilyService:
                 )
                 if other_members:
                     return None, None, f"Вы уже состоите в группе «{old_group.name}». Сначала покиньте её."
-                # Delete empty solo group
-                await self.session.delete(old_group)
 
         user.family_group_id = group.id
+        await self.session.flush()
+
+        if old_group and old_group.id != group.id:
+            await self.session.delete(old_group)
+
         await self.session.commit()
         await self.session.refresh(group)
 
