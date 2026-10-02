@@ -182,6 +182,29 @@ class FamilyService:
         result = []
         for tx in txs:
             author_name = "Вы" if tx.user_id == user.id else (tx.user.first_name or tx.user.username or "Партнёр")
+            
+            cat_name = tx.category.name if tx.category else None
+            item_name = tx.item_name or cat_name or "Операция"
+            raw_text = tx.raw_text
+
+            # Privacy masking: Hide custom deposit account names in shared family feed
+            is_deposit_op = (
+                tx.asset_account_id is not None
+                or (cat_name and any(k in cat_name.lower() for k in ["депозит", "вклад", "копилк", "накоплен"]))
+                or any(k in item_name.lower() for k in ["депозит", "вклад", "копилк", "накоплен", "процент"]))
+
+            if is_deposit_op:
+                raw_text = None  # Never leak raw voice/text prompt to family feed
+                if "процент" in item_name.lower() or (cat_name and "процент" in cat_name.lower()):
+                    item_name = "Проценты по вкладу"
+                    cat_name = "Проценты по вкладу"
+                elif tx.type in (CategoryType.transfer_out, CategoryType.expense):
+                    item_name = "Пополнение депозита"
+                    cat_name = "Депозит и вклады"
+                else:
+                    item_name = "Снятие с депозита"
+                    cat_name = "Снятие с депозита"
+
             result.append({
                 "id": tx.id,
                 "user_id": tx.user_id,
@@ -193,9 +216,9 @@ class FamilyService:
                 "discount_amount": float(tx.discount_amount) if tx.discount_amount else None,
                 "type": tx.type.value if hasattr(tx.type, "value") else str(tx.type),
                 "category_id": tx.category_id,
-                "category_name": tx.category.name if tx.category else None,
-                "item_name": tx.item_name,
-                "raw_text": tx.raw_text,
+                "category_name": cat_name,
+                "item_name": item_name,
+                "raw_text": raw_text,
                 "source": tx.source.value if hasattr(tx.source, "value") else str(tx.source),
                 "transaction_date": tx.transaction_date
             })

@@ -19,26 +19,18 @@ class AssetService:
         self.session = session
         self.category_service = CategoryService(session)
 
-    async def get_accessible_assets(self, user_id: int) -> List[AssetAccount]:
-        """Fetch all active asset accounts for user and their family group."""
-        user = await self.session.get(User, user_id)
-        target_user_ids = {user_id}
-        if user and user.family_group_id:
-            family_members = await self.session.scalars(
-                select(User.id).where(User.family_group_id == user.family_group_id)
-            )
-            target_user_ids.update(family_members.all())
-
+    async def get_user_assets(self, user_id: int) -> List[AssetAccount]:
+        """Fetch all active personal asset accounts for user (isolated to user only)."""
         res = await self.session.scalars(
             select(AssetAccount)
-            .where(AssetAccount.user_id.in_(target_user_ids), AssetAccount.is_active == True)
+            .where(AssetAccount.user_id == user_id, AssetAccount.is_active == True)
             .order_by(AssetAccount.created_at.desc())
         )
         return list(res.all())
 
-    async def get_user_assets(self, user_id: int) -> List[AssetAccount]:
-        """Fetch all active asset accounts accessible to user."""
-        return await self.get_accessible_assets(user_id)
+    async def get_accessible_assets(self, user_id: int) -> List[AssetAccount]:
+        """Fetch active asset accounts for user (strictly personal)."""
+        return await self.get_user_assets(user_id)
 
     @staticmethod
     def _extract_meaningful_tokens(text: str) -> set[str]:
