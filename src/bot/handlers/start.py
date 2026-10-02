@@ -7,6 +7,7 @@ from src.models.user import User
 from src.core.config import settings
 from src.bot.keyboards.inline import currency_keyboard, welcome_back_keyboard, miniapp_keyboard
 from src.bot.messages import BotMessages
+from src.services.transaction_service import TransactionService
 
 router = Router()
 
@@ -36,7 +37,7 @@ async def cmd_start(message: Message, session: AsyncSession):
     user = await session.scalar(select(User).where(User.id == user_id))
     
     if not user:
-        user = User(id=user_id, username=username, first_name=first_name, currency="RUB")
+        user = User(id=user_id, username=username, first_name=first_name, currency="KZT")
         session.add(user)
         await session.commit()
         await message.answer(
@@ -51,9 +52,22 @@ async def cmd_start(message: Message, session: AsyncSession):
         user.first_name = first_name
         await session.commit()
 
+    if user.initial_balance is None:
+        await message.answer(
+            f"👋 <b>С возвращением, {user.first_name or ''}!</b>\n\n{BotMessages.ask_initial_balance()}"
+        )
+        return
+
+    tx_service = TransactionService(session)
+    bal_data = await tx_service.get_user_balance(user.id)
     miniapp_url = get_miniapp_url()
+
     await message.answer(
-        BotMessages.welcome_back(first_name=user.first_name, currency=user.currency),
+        BotMessages.welcome_back(
+            first_name=user.first_name,
+            currency=user.currency,
+            current_balance=bal_data["current_balance"]
+        ),
         reply_markup=welcome_back_keyboard(miniapp_url=miniapp_url)
     )
 
@@ -74,9 +88,17 @@ async def process_currency(callback: CallbackQuery, session: AsyncSession):
     if user:
         user.currency = currency
         await session.commit()
-        
-    await callback.message.edit_text(
-        BotMessages.currency_updated(currency),
-        reply_markup=welcome_back_keyboard()
-    )
+
+    if user and user.initial_balance is None:
+        await callback.message.edit_text(
+            f"{BotMessages.currency_updated(currency)}\n\n{BotMessages.ask_initial_balance()}"
+        )
+    else:
+        miniapp_url = get_miniapp_url()
+        tx_service = TransactionService(session)
+        bal_data = await tx_service.get_user_balance(user_id)
+        await callback.message.edit_text(
+            BotMessages.currency_updated(currency),
+            reply_markup=welcome_back_keyboard(miniapp_url=miniapp_url)
+        )
     await callback.answer()

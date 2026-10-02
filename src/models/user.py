@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import BigInteger, String, Boolean, ForeignKey
+from sqlalchemy import BigInteger, String, Boolean, ForeignKey, Numeric
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin
@@ -14,6 +14,7 @@ class User(Base, TimestampMixin):
     username: Mapped[Optional[str]] = mapped_column(String(64))
     first_name: Mapped[Optional[str]] = mapped_column(String(128))
     currency: Mapped[str] = mapped_column(String(3), default="KZT")
+    initial_balance: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True, default=None)
     family_group_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("family_groups.id"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 

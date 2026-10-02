@@ -19,6 +19,21 @@ async def process_photo_transaction(message: Message, session: AsyncSession, bot
     await bot.download(message.photo[-1].file_id, destination=photo_buffer)
     image_bytes = photo_buffer.getvalue()
 
+    user = await session.get(User, message.from_user.id)
+    if not user:
+        user = User(
+            id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            currency="KZT"
+        )
+        session.add(user)
+        await session.commit()
+
+    if user.initial_balance is None:
+        await message.reply(BotMessages.guard_set_balance_first())
+        return
+
     tx_service = TransactionService(session)
     try:
         txs = await tx_service.process_receipt_photo(
@@ -26,9 +41,15 @@ async def process_photo_transaction(message: Message, session: AsyncSession, bot
             image_bytes=image_bytes,
             mime_type="image/jpeg"
         )
-        user = await session.get(User, message.from_user.id)
-        currency = user.currency if user else "RUB"
-        await message.reply(BotMessages.tx_success(txs, currency=currency))
+        bal_data = await tx_service.get_user_balance(message.from_user.id)
+        currency = user.currency or "KZT"
+        await message.reply(
+            BotMessages.tx_success(
+                txs,
+                currency=currency,
+                current_balance=bal_data["current_balance"]
+            )
+        )
     except (InvalidTransactionAmountError, TransactionParseError):
         await message.reply(BotMessages.photo_clarification())
     except Exception as exc:

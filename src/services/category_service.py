@@ -17,6 +17,8 @@ DEFAULT_CATEGORIES = [
     ("Зарплата", CategoryType.income),
     ("Подарок", CategoryType.expense),
     ("Подарок", CategoryType.income),
+    ("Денежный перевод", CategoryType.expense),
+    ("Денежный перевод", CategoryType.income),
 ]
 
 

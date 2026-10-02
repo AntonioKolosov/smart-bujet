@@ -1,6 +1,6 @@
 from decimal import Decimal
 from typing import Optional, Tuple, List
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user import User
@@ -304,4 +304,28 @@ class TransactionService:
 
         await self.session.commit()
         return transactions
+
+    async def get_user_balance(self, user_id: int) -> dict:
+        """Calculate live account balance: initial_balance + sum(income) - sum(expenses)."""
+        user = await self.session.get(User, user_id)
+        initial = Decimal(str(user.initial_balance or 0)) if user and user.initial_balance is not None else Decimal(0)
+
+        income_sum = await self.session.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .where(Transaction.user_id == user_id, Transaction.type == CategoryType.income)
+        ) or 0
+
+        expense_sum = await self.session.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .where(Transaction.user_id == user_id, Transaction.type == CategoryType.expense)
+        ) or 0
+
+        current_balance = initial + Decimal(str(income_sum)) - Decimal(str(expense_sum))
+        return {
+            "initial_balance": float(initial),
+            "total_income": float(income_sum),
+            "total_expense": float(expense_sum),
+            "current_balance": float(current_balance),
+            "currency": user.currency if user else "KZT"
+        }
 

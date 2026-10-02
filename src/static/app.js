@@ -35,9 +35,11 @@
 
   let userCurrency = 'KZT';
   let currencySymbol = '₸';
+  let userInitialBalance = null;
 
   const userGreetingEl = document.getElementById('userGreeting');
   const currencyBadgeEl = document.getElementById('currencyBadge');
+  const currentBalanceEl = document.getElementById('currentBalance');
   const totalExpenseEl = document.getElementById('totalExpense');
   const totalIncomeEl = document.getElementById('totalIncome');
   const txListEl = document.getElementById('txList');
@@ -95,6 +97,12 @@
         currencySymbol = CURRENCY_SYMBOLS[userCurrency] || userCurrency;
         userGreetingEl.textContent = data.first_name ? `Привет, ${data.first_name}!` : 'Smart Bujet';
         currencyBadgeEl.textContent = `${currencySymbol} ${userCurrency}`;
+        if (data.initial_balance !== null && data.initial_balance !== undefined) {
+          userInitialBalance = Number(data.initial_balance);
+        }
+        if (data.current_balance !== null && data.current_balance !== undefined) {
+          currentBalanceEl.textContent = formatMoney(data.current_balance);
+        }
       }
     } catch (e) {
       currencyBadgeEl.textContent = `${currencySymbol} ${userCurrency}`;
@@ -130,6 +138,8 @@
       emptyEl.classList.remove('hidden');
       totalExpenseEl.textContent = formatMoney(0);
       totalIncomeEl.textContent = formatMoney(0);
+      const balance = (userInitialBalance !== null ? userInitialBalance : 0);
+      currentBalanceEl.textContent = formatMoney(balance);
       return;
     }
 
@@ -154,6 +164,8 @@
 
     totalExpenseEl.textContent = formatMoney(sumExpense);
     totalIncomeEl.textContent = formatMoney(sumIncome);
+    const balance = (userInitialBalance !== null ? userInitialBalance : 0) + sumIncome - sumExpense;
+    currentBalanceEl.textContent = formatMoney(balance);
 
     const fragment = document.createDocumentFragment();
 

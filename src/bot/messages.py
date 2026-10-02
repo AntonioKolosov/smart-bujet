@@ -24,13 +24,21 @@ def format_amount(amount: float, currency_code: str | None) -> str:
 
 class BotMessages:
     @staticmethod
-    def tx_success(transactions: Union[List[Transaction], Transaction], currency: str = "RUB") -> str:
+    def tx_success(
+        transactions: Union[List[Transaction], Transaction],
+        currency: str = "RUB",
+        current_balance: float | None = None
+    ) -> str:
         if not transactions:
             return "✅ <b>Записано!</b>"
 
         tx_list: List[Transaction] = [transactions] if isinstance(transactions, Transaction) else transactions
         if not tx_list:
             return "✅ <b>Записано!</b>"
+
+        balance_suffix = ""
+        if current_balance is not None:
+            balance_suffix = f"\n\n💳 <b>Остаток на счёте: {format_amount(current_balance, currency)}</b>"
 
         # Case 1: Single item formatting
         if len(tx_list) == 1:
@@ -50,6 +58,7 @@ class BotMessages:
                 f"{icon} <b>{type_label}</b>: {amount_str}{discount_line}\n"
                 f"📌 Позиция: <b>{tx.item_name}</b>\n"
                 f"📁 Категория: <b>{cat_name}</b>"
+                f"{balance_suffix}"
             )
 
         # Case 2: Multi-item batch formatting
@@ -86,6 +95,9 @@ class BotMessages:
             lines.append(f"💰 <b>К оплате: {format_amount(total_expense, currency)}</b>")
         else:
             lines.append(f"💰 <b>Итого: {format_amount(total_income, currency)}</b>")
+
+        if current_balance is not None:
+            lines.append(f"\n💳 <b>Остаток на счёте: {format_amount(current_balance, currency)}</b>")
 
         return "\n".join(lines)
 
@@ -137,16 +149,44 @@ class BotMessages:
         )
 
     @staticmethod
-    def welcome_back(first_name: str | None, currency: str) -> str:
+    def welcome_back(first_name: str | None, currency: str, current_balance: float | None = None) -> str:
         name_greeting = f", {first_name}" if first_name else ""
         symbol = get_currency_symbol(currency)
+        balance_part = ""
+        if current_balance is not None:
+            balance_part = f"💳 Текущий баланс: <b>{format_amount(current_balance, currency)}</b>\n\n"
         return (
             f"👋 <b>С возвращением{name_greeting}!</b>\n\n"
-            f"💰 Ваша текущая валюта: <b>{currency} ({symbol})</b>\n\n"
-            f"💡 <b>Как записать трату:</b>\n"
-            f"• Отправьте текст: <i>«Кофе 250»</i> или <i>«Рыба 4032 и хлеб 300»</i>\n"
+            f"💰 Ваша текущая валюта: <b>{currency} ({symbol})</b>\n"
+            f"{balance_part}"
+            f"💡 <b>Как записать операцию:</b>\n"
+            f"• Текстом: <i>«Кофе 250»</i>, <i>«Зарплата 860000»</i>, <i>«Перевел жене 50000»</i>\n"
             f"• Запишите голосовое сообщение\n"
             f"• Отправьте фото чека"
+        )
+
+    @staticmethod
+    def ask_initial_balance() -> str:
+        return (
+            "💳 <b>Сколько у тебя сейчас на счету?</b>\n\n"
+            "Напиши сумму (например: <code>500000</code> или <code>0</code>) или назови её голосом, чтобы я начал точный учёт баланса:"
+        )
+
+    @staticmethod
+    def initial_balance_set(amount: float, currency: str) -> str:
+        return (
+            f"✅ <b>Начальный баланс установлен: {format_amount(amount, currency)}</b>!\n\n"
+            f"Теперь ты можешь вести учёт:\n"
+            f"• Расходы: <i>«Кофе 250»</i>, <i>«Я перевел жене 50000»</i>\n"
+            f"• Доходы: <i>«Пришла зарплата 860000»</i>, <i>«Подарок 20000»</i>\n"
+            f"• Голосом или фото чеков"
+        )
+
+    @staticmethod
+    def guard_set_balance_first() -> str:
+        return (
+            "⚠️ <b>Прежде чем записывать траты, укажи: Сколько у тебя сейчас на счету?</b>\n\n"
+            "Напиши сумму (например: <code>500000</code> или <code>0</code>) или назови её голосом."
         )
 
     @staticmethod
