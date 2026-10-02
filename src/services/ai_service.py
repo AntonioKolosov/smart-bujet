@@ -55,10 +55,25 @@ class AIService:
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_name = model_name or settings.gemini_model
 
+    @staticmethod
+    def _format_assets_context(assets_context: Optional[List[Dict[str, Any]]]) -> str:
+        if not assets_context:
+            return ""
+        lines = [
+            f"- ID: {a.get('id')}, Название: \"{a.get('name')}\", Тип: {a.get('type')}, Валюта: {a.get('currency')}"
+            for a in assets_context
+        ]
+        return (
+            "\nСуществующие счета и депозиты пользователя/семьи:\n"
+            + "\n".join(lines)
+            + "\nВАЖНО: Если операция связана с депозитом, вкладом или валютой, сопоставь её с одним из существующих счетов/депозитов пользователя выше (учитывай перестановку слов, синонимы, неточности распознавания, например «депозит Тоша и Айкоша» -> «Страховка Айкоша и Тоша»). В JSON обязательно заполни 'asset_account_id' (ID счета) и точный 'target_asset_name'.\n"
+        )
+
     async def classify_text(
         self,
         text: str,
-        categories: List[str]
+        categories: List[str],
+        assets_context: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """Classify message into items and optional discount parameters."""
         if not self.client:
@@ -71,15 +86,17 @@ class AIService:
                 }]
             }
 
+        assets_block = self._format_assets_context(assets_context)
         prompt = (
             f"Ты финансовый ассистент приложения учёта бюджета Smart Bujet.\n"
             f"Определи ВСЕ позиции транзакций (расходы и доходы) и наличие скидки из сообщения: \"{text}\".\n"
-            f"Доступные категории: {', '.join(categories)}.\n\n"
+            f"Доступные категории: {', '.join(categories)}.\n"
+            f"{assets_block}\n"
             f"КРИТИЧЕСКИ ВАЖНО различать 4 типа операций:\n"
             f"- ДОХОДЫ (type: 'income'): «пришла зарплата», «зарплата», «получил», «заработал», «мне перевели», «пришел перевод», «аванс», «премия», «подарили», «кэшбэк», «подарок», «проценты по вкладу». Категории: «Зарплата», «Подарок», «Денежный перевод», «Проценты по вкладу».\n"
             f"- РАСХОДЫ (type: 'expense'): покупки товаров/услуг, еда, такси, исходящие переводы людям («я перевел жене», «перевел», «скинул», «купил хлеб», «потратил», «оплатил»). Переводы людям относи к категории «Денежный перевод».\n"
             f"- ПЕРЕВОД В АКТИВЫ / ДЕПОЗИТ / ВАЛЮТА (type: 'transfer_out'): деньги НЕ тратятся, а сохраняются в активах:\n"
-            f"  * Пополнение вклада/депозита: «положил на депозит 100000», «закинул на вклад 50000», «в копилку 20000» -> category: 'Депозит и вклады', type: 'transfer_out'.\n"
+            f"  * Пополнение вклада/депозита: «положил на депозит 100000», «закинул на вклад 50000», «в копилку 20000», «пополнила депозит Тоша и Айкоша» -> category: 'Депозит и вклады', type: 'transfer_out'.\n"
             f"  * Покупка иностранной валюты: «купил 100 долларов», «купил 200$ по 500», «купил евро на 50000» -> category: 'Покупка валюты', type: 'transfer_out', target_currency: 'USD'/'EUR', asset_amount: число_валюты.\n"
             f"- СНЯТИЕ ИЗ АКТИВОВ / ПРОДАЖА ВАЛЮТЫ (type: 'transfer_in'): «снял с депозита 50000», «вывел из копилки 10000», «продал 100 долларов» -> category: 'Снятие с депозита' или 'Продажа валюты', type: 'transfer_in'.\n\n"
             f"Каждую позицию выдели отдельно. Название позиции (item_name) пиши с заглавной буквы.\n"
@@ -88,7 +105,7 @@ class AIService:
             f"Верни ответ строго в виде JSON-объекта:\n"
             f'{{\n'
             f'  "items": [\n'
-            f'    {{"category": "название из категорий", "type": "expense" или "income" или "transfer_out" или "transfer_in", "amount": число_в_базовой_валюте, "target_currency": "USD/EUR/KZT", "asset_amount": число_валюты_если_есть, "item_name": "Название позиции"}}\n'
+            f'    {{"category": "название из категорий", "type": "expense" или "income" или "transfer_out" или "transfer_in", "amount": число_в_базовой_валюте, "target_currency": "USD/EUR/KZT", "asset_amount": число_валюты_если_есть, "item_name": "Название позиции", "asset_account_id": "UUID_или_null", "target_asset_name": "название_актива_или_null"}}\n'
             f'  ],\n'
             f'  "discount_percent": число_или_null,\n'
             f'  "discount_amount": число_или_null,\n'
@@ -114,21 +131,24 @@ class AIService:
         self,
         audio_bytes: bytes,
         mime_type: str,
-        categories: List[str]
+        categories: List[str],
+        assets_context: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """In-memory voice message processing with discount and income extraction."""
         if not self.client:
             return {"items": []}
 
         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
+        assets_block = self._format_assets_context(assets_context)
         prompt = (
             f"Прослушай аудиосообщение и выдели ВСЕ упомянутые расходы и доходы, а также скидки.\n"
-            f"Доступные категории: {', '.join(categories)}.\n\n"
+            f"Доступные категории: {', '.join(categories)}.\n"
+            f"{assets_block}\n"
             f"КРИТИЧЕСКИ ВАЖНО различать 4 типа операций:\n"
             f"- ДОХОДЫ (type: 'income'): «пришла зарплата», «зарплата», «получил», «заработал», «мне перевели», «пришел перевод», «аванс», «премия», «подарили», «кэшбэк», «подарок», «проценты по вкладу». Категории: «Зарплата», «Подарок», «Денежный перевод», «Проценты по вкладу».\n"
             f"- РАСХОДЫ (type: 'expense'): покупки, траты, исходящие переводы людям («я перевел жене», «перевел», «скинул», «купил», «потратил», «оплатил»). Исходящие переводы относи к категории «Денежный перевод».\n"
             f"- ПЕРЕВОД В АКТИВЫ / ДЕПОЗИТ / ВАЛЮТА (type: 'transfer_out'): деньги НЕ тратятся, а сохраняются в активах:\n"
-            f"  * Пополнение вклада/депозита: «положил на депозит 100000», «закинул на вклад 50000», «в копилку 20000» -> category: 'Депозит и вклады', type: 'transfer_out'.\n"
+            f"  * Пополнение вклада/депозита: «положил на депозит 100000», «закинул на вклад 50000», «в копилку 20000», «пополнила депозит Тоша и Айкоша» -> category: 'Депозит и вклады', type: 'transfer_out'.\n"
             f"  * Покупка иностранной валюты: «купил 100 долларов», «купил 200$ по 500», «купил евро на 50000» -> category: 'Покупка валюты', type: 'transfer_out', target_currency: 'USD'/'EUR', asset_amount: число_валюты.\n"
             f"- СНЯТИЕ ИЗ АКТИВОВ / ПРОДАЖА ВАЛЮТЫ (type: 'transfer_in'): «снял с депозита 50000», «вывел из копилки 10000», «продал 100 долларов» -> category: 'Снятие с депозита' или 'Продажа валюты', type: 'transfer_in'.\n\n"
             f"Каждую позицию выдели отдельно. Название каждой позиции (item_name) пиши с заглавной буквы.\n"
@@ -137,7 +157,7 @@ class AIService:
             f"Верни ответ строго в виде JSON-объекта:\n"
             f'{{\n'
             f'  "items": [\n'
-            f'    {{"category": "название из категорий", "type": "expense" или "income" или "transfer_out" или "transfer_in", "amount": число_в_базовой_валюте, "target_currency": "USD/EUR/KZT", "asset_amount": число_валюты_если_есть, "item_name": "Название позиции", "raw_text": "распознанный текст"}}\n'
+            f'    {{"category": "название из категорий", "type": "expense" или "income" или "transfer_out" или "transfer_in", "amount": число_в_базовой_валюте, "target_currency": "USD/EUR/KZT", "asset_amount": число_валюты_если_есть, "item_name": "Название позиции", "asset_account_id": "UUID_или_null", "target_asset_name": "название_актива_или_null", "raw_text": "распознанный текст"}}\n'
             f'  ],\n'
             f'  "discount_percent": число_или_null,\n'
             f'  "discount_amount": число_или_null,\n'

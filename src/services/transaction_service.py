@@ -1,6 +1,7 @@
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Any
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,6 +78,60 @@ class TransactionService:
             cat = categories[0] if categories else None
         return cat
 
+    async def _handle_asset_transfer(
+        self,
+        user_id: int,
+        user: Optional[User],
+        item: dict,
+        cat_type: CategoryType,
+        amt: Decimal,
+        asset_amt: Optional[Any],
+        context_text: Optional[str] = None
+    ) -> Tuple[uuid.UUID, str]:
+        raw_curr = item.get("target_currency")
+        target_currency = (
+            raw_curr.strip().upper()
+            if raw_curr and str(raw_curr).strip().upper() not in ("NONE", "NULL", "")
+            else None
+        ) or (user.currency if user else "KZT")
+
+        raw_name_lower = (item.get("item_name") or context_text or "").lower()
+        is_deposit_keyword = any(k in raw_name_lower for k in ["депозит", "вклад", "копилк", "страховк", "сейф"])
+
+        if is_deposit_keyword:
+            target_type = AssetType.deposit
+        elif target_currency != (user.currency if user else "KZT"):
+            target_type = AssetType.currency
+        else:
+            target_type = AssetType.deposit
+
+        target_asset_name = item.get("target_asset_name") or item.get("item_name")
+        asset_id_hint = item.get("asset_account_id")
+
+        asset_acc = await self.asset_service.resolve_asset_account(
+            user_id=user_id,
+            target_name=target_asset_name,
+            target_type=target_type,
+            target_currency=target_currency,
+            asset_id_hint=asset_id_hint
+        )
+        if not asset_acc:
+            safe_name = target_asset_name if target_asset_name and "none" not in target_asset_name.lower() else None
+            asset_acc = await self.asset_service.get_or_create_default_asset(
+                user_id=user_id,
+                asset_type=target_type,
+                currency=target_currency,
+                name=safe_name
+            )
+
+        delta = Decimal(str(asset_amt if asset_amt is not None else amt))
+        if cat_type == CategoryType.transfer_out:
+            asset_acc.balance = float(Decimal(str(asset_acc.balance or 0)) + delta)
+        else:
+            asset_acc.balance = float(Decimal(str(asset_acc.balance or 0)) - delta)
+
+        return asset_acc.id, asset_acc.name
+
     async def process_text(self, user_id: int, text: str) -> List[Transaction]:
         """
         Multi-item capable text transaction processing:
@@ -98,7 +153,17 @@ class TransactionService:
         else:
             available_cats = await self.category_service.get_categories(user_id)
             cat_names = list({c.name for c in available_cats})
-            payload = await self.ai_service.classify_text(text, cat_names)
+            accessible_assets = await self.asset_service.get_accessible_assets(user_id)
+            assets_context = [
+                {
+                    "id": str(a.id),
+                    "name": a.name,
+                    "type": a.type.value if hasattr(a.type, "value") else str(a.type),
+                    "currency": a.currency,
+                }
+                for a in accessible_assets
+            ]
+            payload = await self.ai_service.classify_text(text, cat_names, assets_context=assets_context)
             raw_items = payload.get("items", [])
             discount_percent = payload.get("discount_percent")
             discount_amount = payload.get("discount_amount")
@@ -143,19 +208,17 @@ class TransactionService:
             ex_rate = item.get("exchange_rate")
 
             if cat_type in (CategoryType.transfer_out, CategoryType.transfer_in):
-                target_currency = item.get("target_currency", "KZT")
-                target_type = AssetType.currency if target_currency != "KZT" else AssetType.deposit
-                asset_acc = await self.asset_service.get_or_create_default_asset(
+                asset_account_id, asset_acc_name = await self._handle_asset_transfer(
                     user_id=user_id,
-                    asset_type=target_type,
-                    currency=target_currency
+                    user=user,
+                    item=item,
+                    cat_type=cat_type,
+                    amt=amt,
+                    asset_amt=asset_amt,
+                    context_text=text
                 )
-                asset_account_id = asset_acc.id
-                delta = Decimal(str(asset_amt if asset_amt is not None else amt))
-                if cat_type == CategoryType.transfer_out:
-                    asset_acc.balance = float(Decimal(str(asset_acc.balance or 0)) + delta)
-                else:
-                    asset_acc.balance = float(Decimal(str(asset_acc.balance or 0)) - delta)
+                action_prefix = "Пополнение" if cat_type == CategoryType.transfer_out else "Снятие"
+                normalized_name = f"{action_prefix}: {asset_acc_name}"
 
             tx = Transaction(
                 user_id=user_id,
@@ -195,8 +258,18 @@ class TransactionService:
 
         available_cats = await self.category_service.get_categories(user_id)
         cat_names = list({c.name for c in available_cats})
+        accessible_assets = await self.asset_service.get_accessible_assets(user_id)
+        assets_context = [
+            {
+                "id": str(a.id),
+                "name": a.name,
+                "type": a.type.value if hasattr(a.type, "value") else str(a.type),
+                "currency": a.currency,
+            }
+            for a in accessible_assets
+        ]
 
-        payload = await self.ai_service.parse_voice(audio_bytes, mime_type, cat_names)
+        payload = await self.ai_service.parse_voice(audio_bytes, mime_type, cat_names, assets_context=assets_context)
         raw_items = payload.get("items", [])
         if not raw_items:
             raise TransactionParseError("Could not parse voice transaction")
@@ -241,19 +314,17 @@ class TransactionService:
             ex_rate = item.get("exchange_rate")
 
             if cat_type in (CategoryType.transfer_out, CategoryType.transfer_in):
-                target_currency = item.get("target_currency", "KZT")
-                target_type = AssetType.currency if target_currency != "KZT" else AssetType.deposit
-                asset_acc = await self.asset_service.get_or_create_default_asset(
+                asset_account_id, asset_acc_name = await self._handle_asset_transfer(
                     user_id=user_id,
-                    asset_type=target_type,
-                    currency=target_currency
+                    user=user,
+                    item=item,
+                    cat_type=cat_type,
+                    amt=amt,
+                    asset_amt=asset_amt,
+                    context_text=last_raw_text
                 )
-                asset_account_id = asset_acc.id
-                delta = Decimal(str(asset_amt if asset_amt is not None else amt))
-                if cat_type == CategoryType.transfer_out:
-                    asset_acc.balance = float(Decimal(str(asset_acc.balance or 0)) + delta)
-                else:
-                    asset_acc.balance = float(Decimal(str(asset_acc.balance or 0)) - delta)
+                action_prefix = "Пополнение" if cat_type == CategoryType.transfer_out else "Снятие"
+                normalized_name = f"{action_prefix}: {asset_acc_name}"
 
             tx = Transaction(
                 user_id=user_id,

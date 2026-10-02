@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Optional, Dict, Any
@@ -18,14 +19,116 @@ class AssetService:
         self.session = session
         self.category_service = CategoryService(session)
 
-    async def get_user_assets(self, user_id: int) -> List[AssetAccount]:
-        """Fetch all active asset accounts for user."""
+    async def get_accessible_assets(self, user_id: int) -> List[AssetAccount]:
+        """Fetch all active asset accounts for user and their family group."""
+        user = await self.session.get(User, user_id)
+        target_user_ids = {user_id}
+        if user and user.family_group_id:
+            family_members = await self.session.scalars(
+                select(User.id).where(User.family_group_id == user.family_group_id)
+            )
+            target_user_ids.update(family_members.all())
+
         res = await self.session.scalars(
             select(AssetAccount)
-            .where(AssetAccount.user_id == user_id, AssetAccount.is_active == True)
+            .where(AssetAccount.user_id.in_(target_user_ids), AssetAccount.is_active == True)
             .order_by(AssetAccount.created_at.desc())
         )
         return list(res.all())
+
+    async def get_user_assets(self, user_id: int) -> List[AssetAccount]:
+        """Fetch all active asset accounts accessible to user."""
+        return await self.get_accessible_assets(user_id)
+
+    @staticmethod
+    def _extract_meaningful_tokens(text: str) -> set[str]:
+        """Extract meaningful normalized word tokens, stripping punctuation and common stopwords."""
+        stopwords = {
+            "и", "в", "на", "с", "со", "депозит", "вклад", "счет", "счёт",
+            "копилка", "страховка", "деньги", "пополнение", "перевод", "мой",
+            "моя", "мое", "наш", "наша", "наше", "для"
+        }
+        words = re.findall(r"\b[a-zA-Zа-яА-ЯёЁ0-9]+\b", text.lower())
+        return {w for w in words if w not in stopwords and len(w) > 2}
+
+    async def resolve_asset_account(
+        self,
+        user_id: int,
+        target_name: Optional[str] = None,
+        target_type: Optional[AssetType] = None,
+        target_currency: Optional[str] = None,
+        asset_id_hint: Optional[str] = None
+    ) -> Optional[AssetAccount]:
+        """
+        Multi-tier deterministic and fuzzy matching for asset accounts:
+        1. Exact UUID hint match.
+        2. Exact name match (case-insensitive).
+        3. Token overlap match (e.g. 'Тоша и Айкоша' -> 'Страховка Айкоша и Тоша').
+        4. Substring containment match.
+        5. Single deposit heuristic: if user/family has only 1 deposit and requested type is deposit.
+        6. Currency match (for currency assets).
+        7. Fallback to primary active deposit if deposit requested.
+        """
+        accounts = await self.get_accessible_assets(user_id)
+        if not accounts:
+            return None
+
+        # 1. UUID hint match
+        if asset_id_hint:
+            for acc in accounts:
+                if str(acc.id) == str(asset_id_hint):
+                    return acc
+
+        target_name_clean = (target_name or "").strip()
+        target_name_lower = target_name_clean.lower()
+
+        # 2. Exact match
+        for acc in accounts:
+            if acc.name.strip().lower() == target_name_lower:
+                return acc
+
+        # 3. Token set overlap match (Jaccard / intersection)
+        target_tokens = self._extract_meaningful_tokens(target_name_lower)
+        best_match = None
+        best_score = 0.0
+
+        if target_tokens:
+            for acc in accounts:
+                acc_tokens = self._extract_meaningful_tokens(acc.name)
+                if not acc_tokens:
+                    continue
+                intersection = target_tokens & acc_tokens
+                if intersection:
+                    score = len(intersection) / len(target_tokens)
+                    if score > best_score:
+                        best_score = score
+                        best_match = acc
+
+            if best_match and best_score >= 0.5:
+                return best_match
+
+        # 4. Substring containment match
+        if target_name_clean and len(target_name_clean) >= 3:
+            for acc in accounts:
+                if target_name_lower in acc.name.lower() or acc.name.lower() in target_name_lower:
+                    return acc
+
+        # 5. Single deposit heuristic
+        deposit_accounts = [a for a in accounts if a.type == AssetType.deposit]
+        if target_type == AssetType.deposit and len(deposit_accounts) == 1:
+            return deposit_accounts[0]
+
+        # 6. Currency match
+        if target_type == AssetType.currency and target_currency:
+            for acc in accounts:
+                if acc.type == AssetType.currency and acc.currency.upper() == target_currency.upper():
+                    return acc
+
+        # 7. Fallback to primary deposit
+        if target_type == AssetType.deposit and deposit_accounts:
+            return deposit_accounts[0]
+
+        return None
 
     async def get_or_create_default_asset(
         self,
@@ -35,21 +138,23 @@ class AssetService:
         name: Optional[str] = None
     ) -> AssetAccount:
         """Find an existing asset of matching type/currency or create a sensible default."""
+        safe_currency = currency.strip().upper() if currency and currency.strip().upper() not in ("NONE", "NULL", "") else "KZT"
+
         res = await self.session.scalars(
             select(AssetAccount).where(
                 AssetAccount.user_id == user_id,
                 AssetAccount.type == asset_type,
-                AssetAccount.currency == currency,
+                AssetAccount.currency == safe_currency,
                 AssetAccount.is_active == True
             )
         )
         account = res.first()
         if not account:
-            if not name:
+            if not name or "None" in name or "null" in name.lower():
                 if asset_type == AssetType.deposit:
                     name = "Банковский депозит"
                 elif asset_type == AssetType.currency:
-                    name = f"Наличные {currency}"
+                    name = f"Наличные {safe_currency}"
                 elif asset_type == AssetType.savings:
                     name = "Копилка"
                 else:
@@ -58,7 +163,7 @@ class AssetService:
                 user_id=user_id,
                 name=name,
                 type=asset_type,
-                currency=currency,
+                currency=safe_currency,
                 balance=0.0
             )
             self.session.add(account)
