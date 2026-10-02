@@ -1,13 +1,28 @@
 from aiogram import Router, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from src.models.user import User
-from src.bot.keyboards.inline import currency_keyboard, welcome_back_keyboard
+from src.core.config import settings
+from src.bot.keyboards.inline import currency_keyboard, welcome_back_keyboard, miniapp_keyboard
 from src.bot.messages import BotMessages
 
 router = Router()
+
+def get_miniapp_url() -> str | None:
+    if settings.domain and settings.domain != "localhost":
+        return f"https://{settings.domain}/app"
+    return None
+
+@router.message(Command("miniapp"))
+@router.message(Command("app"))
+async def cmd_miniapp(message: Message):
+    url = get_miniapp_url() or "https://localhost/app"
+    await message.answer(
+        "📱 Нажмите кнопку ниже, чтобы открыть журнал транзакций во весь экран:",
+        reply_markup=miniapp_keyboard(url)
+    )
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, session: AsyncSession):
@@ -33,9 +48,10 @@ async def cmd_start(message: Message, session: AsyncSession):
         user.first_name = first_name
         await session.commit()
 
+    miniapp_url = get_miniapp_url()
     await message.answer(
         BotMessages.welcome_back(first_name=user.first_name, currency=user.currency),
-        reply_markup=welcome_back_keyboard()
+        reply_markup=welcome_back_keyboard(miniapp_url=miniapp_url)
     )
 
 @router.callback_query(F.data == "change_currency")

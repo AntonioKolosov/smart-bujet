@@ -31,3 +31,18 @@ async def validate_auth(data: ValidateInitDataRequest):
         "user": user_info
     }
 
+
+from fastapi import Depends
+from src.api.deps import get_current_user
+from src.models.user import User
+
+@router.get("/me")
+async def get_me(current_user: User = Depends(get_current_user)):
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "first_name": current_user.first_name,
+        "currency": current_user.currency,
+        "family_group_id": str(current_user.family_group_id) if current_user.family_group_id else None
+    }
+

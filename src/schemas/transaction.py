@@ -18,7 +18,10 @@ class TransactionRead(BaseModel):
     user_id: int
     family_group_id: Optional[UUID] = None
     category_id: int
+    category_name: Optional[str] = None
     amount: Decimal
+    original_amount: Optional[Decimal] = None
+    discount_amount: Optional[Decimal] = None
     type: str
     item_name: Optional[str] = None
     raw_text: Optional[str] = None

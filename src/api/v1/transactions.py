@@ -1,6 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, desc, or_
+from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_db, get_current_user
 from src.schemas.transaction import TransactionRead, TransactionCreate
@@ -27,6 +28,7 @@ async def list_transactions(
 
     query = (
         select(Transaction)
+        .options(joinedload(Transaction.category))
         .where(*conditions)
         .order_by(desc(Transaction.transaction_date))
         .offset(offset)

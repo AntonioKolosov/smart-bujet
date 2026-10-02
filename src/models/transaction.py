@@ -37,3 +37,7 @@ class Transaction(Base, TimestampMixin):
     user: Mapped["User"] = relationship("User", back_populates="transactions")
     family_group: Mapped[Optional["FamilyGroup"]] = relationship("FamilyGroup", back_populates="transactions")
     category: Mapped["Category"] = relationship("Category", back_populates="transactions")
+
+    @property
+    def category_name(self) -> Optional[str]:
+        return self.category.name if self.category else None

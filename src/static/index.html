@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Smart Bujet — Журнал транзакций</title>
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div id="app" class="container">
+    <!-- Header Card -->
+    <header class="app-header">
+      <div class="header-user">
+        <div class="user-greeting" id="userGreeting">Smart Bujet</div>
+        <div class="currency-badge" id="currencyBadge">₸ KZT</div>
+      </div>
+      <div class="header-summary">
+        <div class="summary-card">
+          <span class="summary-label">Расход за период</span>
+          <span class="summary-value expense" id="totalExpense">0 ₸</span>
+        </div>
+        <div class="summary-card">
+          <span class="summary-label">Доход за период</span>
+          <span class="summary-value income" id="totalIncome">0 ₸</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <h2 class="section-title">История транзакций</h2>
+      <button id="refreshBtn" class="refresh-btn" title="Обновить">↻</button>
+    </div>
+
+    <!-- Status Messages -->
+    <div id="loader" class="loader-container">
+      <div class="spinner"></div>
+      <p>Загрузка операций...</p>
+    </div>
+
+    <div id="errorMessage" class="error-banner hidden"></div>
+
+    <div id="emptyMessage" class="empty-banner hidden">
+      <div class="empty-icon">🧾</div>
+      <p class="empty-title">Транзакций пока нет</p>
+      <span class="empty-desc">Отправьте боту текст, голосовое сообщение или фото чека</span>
+    </div>
+
+    <!-- Transaction List Container -->
+    <main id="txList" class="tx-list"></main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
