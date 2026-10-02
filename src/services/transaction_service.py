@@ -7,6 +7,7 @@ from src.models.user import User
 from src.models.category import Category, CategoryType
 from src.models.transaction import Transaction, TransactionSource
 from src.models.alias import UserItemAlias
+from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError
 from src.services.parser_service import ParserService
 from src.services.category_service import CategoryService
 from src.services.ai_service import AIService
@@ -110,8 +111,9 @@ class TransactionService:
             if ai_result.get("item_name") and (not item_name or item_name == text.strip()):
                 item_name = ai_result["item_name"]
 
-        # Ensure default values
-        amount = amount or Decimal("0")
+        if not amount or amount <= Decimal("0"):
+            raise InvalidTransactionAmountError("Amount must be greater than 0", raw_text=text)
+
         if not category:
             cats = await self.category_service.get_categories(user_id, cat_type)
             category = cats[0]
@@ -160,8 +162,10 @@ class TransactionService:
         except Exception:
             amount = Decimal("0")
 
-        item_name = ai_result.get("item_name") or "Голосовая транзакция"
-        raw_text = ai_result.get("raw_text")
+        if amount <= Decimal("0"):
+            raise InvalidTransactionAmountError("Amount must be greater than 0", raw_text=raw_text)
+
+        item_name = ai_result.get("item_name") or raw_text or "Расход"
 
         tx = Transaction(
             user_id=user_id,
@@ -203,6 +207,9 @@ class TransactionService:
             amount = Decimal(str(ai_result.get("amount", 0) or 0))
         except Exception:
             amount = Decimal("0")
+
+        if amount <= Decimal("0"):
+            raise InvalidTransactionAmountError("Amount must be greater than 0")
 
         item_name = ai_result.get("item_name") or "Чек"
 

@@ -1,16 +1,19 @@
 import json
+import logging
 from decimal import Decimal
 from typing import Optional, Dict, Any, List
 from google import genai
 from google.genai import types
 from src.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 
 class AIService:
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
         self.api_key = api_key or settings.google_token
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
-        self.model_name = "gemini-2.5-flash"
+        self.model_name = model_name or settings.gemini_model
 
     async def classify_text(
         self,
@@ -47,7 +50,8 @@ class AIService:
                 )
             )
             return json.loads(response.text)
-        except Exception:
+        except Exception as exc:
+            logger.error("AI classify_text failed: %s", exc)
             return {
                 "category": categories[0] if categories else "Обязательные расходы",
                 "type": "expense",
@@ -73,7 +77,7 @@ class AIService:
             f"Прослушай аудиосообщение о расходе или доходе.\n"
             f"Доступные категории: {', '.join(categories)}.\n"
             f"Верни JSON со следующими полями:\n"
-            f'{{"category": "название из категорий", "type": "expense" или "income", "amount": число, "item_name": "название покупки", "raw_text": "распознанный текст"}}\n'
+            f'{{"category": "название из категорий", "type": "expense" или "income", "amount": число_больше_0, "item_name": "название покупки", "raw_text": "распознанный текст"}}\n'
         )
 
         try:
@@ -86,7 +90,8 @@ class AIService:
                 )
             )
             return json.loads(response.text)
-        except Exception:
+        except Exception as exc:
+            logger.error("AI parse_voice failed: %s", exc)
             return {"category": "Обязательные расходы", "type": "expense", "amount": None, "item_name": "Голосовая запись"}
 
     async def parse_receipt_photo(
@@ -121,6 +126,7 @@ class AIService:
                 )
             )
             return json.loads(response.text)
-        except Exception:
+        except Exception as exc:
+            logger.error("AI parse_receipt_photo failed: %s", exc)
             return {"category": "Продукты", "type": "expense", "amount": None, "item_name": "Чек"}
 
