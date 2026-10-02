@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
