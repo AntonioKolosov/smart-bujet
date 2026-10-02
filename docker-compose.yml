@@ -1,63 +1,48 @@
 services:
   caddy:
     image: caddy:2-alpine
+    container_name: smart_bujet_caddy
+    restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
+      - "8443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
       - backend
     networks:
       - smart_bujet_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.20'
+          memory: 64M
 
   backend:
     build: .
+    image: smart-bujet-backend:latest
+    container_name: smart_bujet_backend
+    restart: unless-stopped
     env_file: .env
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-    depends_on:
-      postgres:
-        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     expose:
       - "8000"
     networks:
       - smart_bujet_net
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-smart_bujet}
-      POSTGRES_USER: ${POSTGRES_USER:-bujet_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_db_pass}
-      MCP_READONLY_PASSWORD: ${MCP_READONLY_PASSWORD:-readonly_pass}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init_db_roles.sql:/docker-entrypoint-initdb.d/init_db_roles.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bujet_user} -d ${POSTGRES_DB:-smart_bujet}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - smart_bujet_net
-
-  mcp-postgres:
-    image: node:20-alpine
-    command: npx -y @modelcontextprotocol/server-postgres postgresql://mcp_readonly:${MCP_READONLY_PASSWORD:-readonly_pass}@postgres:5432/${POSTGRES_DB:-smart_bujet}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - smart_bujet_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.40'
+          memory: 160M
 
 networks:
   smart_bujet_net:
     driver: bridge
 
 volumes:
-  postgres_data:
   caddy_data:
   caddy_config:
+
