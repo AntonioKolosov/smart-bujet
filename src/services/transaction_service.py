@@ -136,7 +136,7 @@ class TransactionService:
             await self._save_alias(user_id, item_name, category.id)
 
         await self.session.commit()
-        await self.session.refresh(tx)
+        tx.category = category
         return tx
 
     async def process_voice(
@@ -182,7 +182,7 @@ class TransactionService:
             await self._save_alias(user_id, item_name, category.id)
 
         await self.session.commit()
-        await self.session.refresh(tx)
+        tx.category = category
         return tx
 
     async def process_receipt_photo(
@@ -228,6 +228,6 @@ class TransactionService:
             await self._save_alias(user_id, item_name, category.id)
 
         await self.session.commit()
-        await self.session.refresh(tx)
+        tx.category = category
         return tx
 
