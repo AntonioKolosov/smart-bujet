@@ -10,15 +10,18 @@ from src.bot.messages import BotMessages
 
 router = Router()
 
-def get_miniapp_url() -> str | None:
-    if settings.domain and settings.domain != "localhost":
-        return f"https://{settings.domain}/app"
-    return None
+def get_miniapp_url() -> str:
+    domain = settings.domain
+    if not domain or domain == "localhost":
+        domain = "85.198.89.188.sslip.io:8443"
+    elif ":" not in domain and "sslip.io" in domain:
+        domain = f"{domain}:8443"
+    return f"https://{domain}/app"
 
 @router.message(Command("miniapp"))
 @router.message(Command("app"))
 async def cmd_miniapp(message: Message):
-    url = get_miniapp_url() or "https://localhost/app"
+    url = get_miniapp_url()
     await message.answer(
         "📱 Нажмите кнопку ниже, чтобы открыть журнал транзакций во весь экран:",
         reply_markup=miniapp_keyboard(url)

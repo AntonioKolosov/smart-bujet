@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from aiogram.types import MenuButtonWebApp, WebAppInfo
+from aiogram.types import MenuButtonWebApp, WebAppInfo, BotCommand
 from src.core.config import settings
 from src.core.database import engine, async_session_maker
 from src.bot.bot import bot, dp
@@ -21,20 +21,33 @@ async def lifespan(app: FastAPI):
         category_service = CategoryService(session)
         await category_service.seed_default_categories()
 
-    polling_task = None
-    if settings.bot_token and settings.domain and settings.domain != "localhost":
-        await bot.set_webhook(url=settings.webhook_url, secret_token=settings.webhook_secret)
-        # Configure Telegram Menu Button for instant MiniApp access
+    # Configure Telegram Menu Button and Bot Commands for instant MiniApp access
+    if settings.bot_token:
         try:
-            miniapp_url = f"https://{settings.domain}/app"
+            domain = settings.domain
+            if not domain or domain == "localhost":
+                domain = "85.198.89.188.sslip.io:8443"
+            elif ":" not in domain and "sslip.io" in domain:
+                domain = f"{domain}:8443"
+            miniapp_url = f"https://{domain}/app"
+
             await bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(
-                    text="Транзакции 💳",
+                    text="Menu",
                     web_app=WebAppInfo(url=miniapp_url)
                 )
             )
+            await bot.set_my_commands([
+                BotCommand(command="miniapp", description="Открыть журнал транзакций"),
+                BotCommand(command="start", description="Перезапустить бота"),
+            ])
+            logger.info("Chat menu button and bot commands successfully registered: %s", miniapp_url)
         except Exception as exc:
-            logger.warning("Could not set chat menu button: %s", exc)
+            logger.warning("Could not set chat menu button or commands: %s", exc)
+
+    polling_task = None
+    if settings.bot_token and settings.domain and settings.domain != "localhost" and ":" not in settings.domain:
+        await bot.set_webhook(url=settings.webhook_url, secret_token=settings.webhook_secret)
     elif settings.bot_token:
         await bot.delete_webhook(drop_pending_updates=True)
         polling_task = asyncio.create_task(dp.start_polling(bot))

@@ -1,3 +1,12 @@
+{
+    http_port 80
+    https_port 443
+}
+
+85.198.89.188.sslip.io {
+    reverse_proxy backend:8000
+}
+
 :80 {
     reverse_proxy backend:8000
 }
