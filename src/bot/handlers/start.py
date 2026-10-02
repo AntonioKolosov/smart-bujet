@@ -13,10 +13,10 @@ async def cmd_start(message: Message, session: AsyncSession):
     user_id = message.from_user.id
     username = message.from_user.username
     
-    user = await session.scalar(select(User).where(User.telegram_id == user_id))
+    user = await session.scalar(select(User).where(User.id == user_id))
     
     if not user:
-        user = User(telegram_id=user_id, username=username, currency="KZT")
+        user = User(id=user_id, username=username, first_name=message.from_user.first_name, currency="RUB")
         session.add(user)
         await session.commit()
     
@@ -30,7 +30,7 @@ async def process_currency(callback: CallbackQuery, session: AsyncSession):
     currency = callback.data.split("_")[1]
     user_id = callback.from_user.id
     
-    user = await session.scalar(select(User).where(User.telegram_id == user_id))
+    user = await session.scalar(select(User).where(User.id == user_id))
     if user:
         user.currency = currency
         await session.commit()

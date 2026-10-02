@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import Integer, String, BigInteger, Boolean, UniqueConstraint
+from sqlalchemy import Integer, String, BigInteger, Boolean, UniqueConstraint, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin

@@ -2,20 +2,28 @@ from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from decimal import Decimal
 from datetime import datetime
+from uuid import UUID
 
 class TransactionCreate(BaseModel):
     amount: Decimal
     category_id: int
-    description: Optional[str] = None
+    item_name: Optional[str] = None
     type: str = "expense"
+    raw_text: Optional[str] = None
+    source: str = "manual"
+    transaction_date: Optional[datetime] = None
 
 class TransactionRead(BaseModel):
-    id: int
+    id: UUID
     user_id: int
-    amount: Decimal
+    family_group_id: Optional[UUID] = None
     category_id: int
-    description: Optional[str]
+    amount: Decimal
     type: str
-    created_at: datetime
-    
+    item_name: Optional[str] = None
+    raw_text: Optional[str] = None
+    source: str
+    transaction_date: datetime
+
     model_config = ConfigDict(from_attributes=True)
+

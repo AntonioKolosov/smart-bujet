@@ -2,17 +2,67 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Optional, Tuple
 
-def parse_amount(text: str) -> Optional[Tuple[Decimal, str]]:
-    text_clean = text.replace(" ", "")
-    # Find decimal numbers or integers
-    match = re.search(r"(\d+(?:\.\d+)?)", text_clean)
-    if not match:
+CURRENCY_SUFFIXES = r"(?:руб(?:лей|ля|\.)?|р\b|тг\b|тенге|kzt\b|rub\b|usd\b|\$|€)"
+
+
+class ParserService:
+    @staticmethod
+    def parse_text(text: str) -> Optional[Tuple[Decimal, str]]:
+        """
+        Fast regex-based extraction of amount and item name from user message.
+        Examples:
+          '1000 яблоки' -> (Decimal('1000'), 'яблоки')
+          'яблоки 1500.50' -> (Decimal('1500.50'), 'яблоки')
+          'кофе 500 руб' -> (Decimal('500'), 'кофе')
+        """
+        if not text:
+            return None
+
+        # Pattern 1: Number at start -> "1000 яблоки" or "1000.50 руб яблоки"
+        m1 = re.match(
+            rf"^\s*([0-9]+(?:[.,][0-9]{{1,2}})?)\s*{CURRENCY_SUFFIXES}?\s*(.*)$",
+            text,
+            flags=re.IGNORECASE
+        )
+        if m1 and m1.group(2).strip():
+            amt_str = m1.group(1).replace(",", ".")
+            desc = re.sub(CURRENCY_SUFFIXES, "", m1.group(2), flags=re.IGNORECASE).strip()
+            try:
+                amt = Decimal(amt_str)
+                if amt > 0 and desc:
+                    return amt, desc
+            except InvalidOperation:
+                pass
+
+        # Pattern 2: Number at end -> "яблоки 1000" or "яблоки 1000 руб"
+        m2 = re.match(
+            rf"^(.*?)\s+([0-9]+(?:[.,][0-9]{{1,2}})?)\s*{CURRENCY_SUFFIXES}?\s*$",
+            text,
+            flags=re.IGNORECASE
+        )
+        if m2 and m2.group(1).strip():
+            amt_str = m2.group(2).replace(",", ".")
+            desc = re.sub(CURRENCY_SUFFIXES, "", m2.group(1), flags=re.IGNORECASE).strip()
+            try:
+                amt = Decimal(amt_str)
+                if amt > 0 and desc:
+                    return amt, desc
+            except InvalidOperation:
+                pass
+
+        # Fallback: Find first isolated number anywhere in text
+        match = re.search(r"\b([0-9]+(?:[.,][0-9]{1,2})?)\b", text)
+        if match:
+            amt_str = match.group(1).replace(",", ".")
+            desc = text[:match.start()] + " " + text[match.end():]
+            desc = re.sub(CURRENCY_SUFFIXES, "", desc, flags=re.IGNORECASE)
+            desc = re.sub(r"\s+", " ", desc).strip()
+            try:
+                amt = Decimal(amt_str)
+                if amt > 0 and desc:
+                    return amt, desc
+            except InvalidOperation:
+                pass
+
         return None
-        
-    try:
-        amount = Decimal(match.group(1))
-        # Remove matched number from original text to leave the description
-        description = re.sub(r"(\d+(?:[\s\.]\d+)?)", "", text).strip()
-        return amount, description
-    except InvalidOperation:
-        return None
+
