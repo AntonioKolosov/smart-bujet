@@ -1,0 +1,16 @@
+[project]
+name = "smart-bujet"
+version = "0.1.0"
+description = "Smart Bujet Project"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]",
+    "uvicorn[standard]",
+    "aiogram>=3.10",
+    "sqlalchemy[asyncio]",
+    "asyncpg",
+    "alembic",
+    "pydantic-settings",
+    "google-genai",
+    "httpx"
+]

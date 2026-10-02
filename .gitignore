@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv/
+env/
+venv/
+node_modules/
+postgres_data/
+caddy_data/
+.idea/
+.vscode/
