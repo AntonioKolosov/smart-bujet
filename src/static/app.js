@@ -56,6 +56,9 @@
 
   // DOM Elements - Family Tab
   const familyLoaderEl = document.getElementById('familyLoader');
+  const familyErrorMessageEl = document.getElementById('familyErrorMessage');
+  const familyErrorTextEl = document.getElementById('familyErrorText');
+  const retryFamilyBtn = document.getElementById('retryFamilyBtn');
   const familyWaitingStateEl = document.getElementById('familyWaitingState');
   const familyActiveStateEl = document.getElementById('familyActiveState');
   const familyInviteInput = document.getElementById('familyInviteInput');
@@ -580,13 +583,17 @@
   // --- Family Budget Logic ---
   async function fetchFamilySummary() {
     if (!familyLoaderEl) return;
+    if (familyErrorMessageEl) familyErrorMessageEl.classList.add('hidden');
     familyLoaderEl.classList.remove('hidden');
     if (familyWaitingStateEl) familyWaitingStateEl.classList.add('hidden');
     if (familyActiveStateEl) familyActiveStateEl.classList.add('hidden');
 
     try {
       const res = await fetch('/api/v1/family/summary', { headers: getHeaders() });
-      if (!res.ok) throw new Error('Ошибка загрузки семейного профиля');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Ошибка сервера (${res.status})`);
+      }
       const data = await res.json();
 
       if (data.status === 'single_member') {
@@ -606,6 +613,12 @@
       }
     } catch (err) {
       console.error('Family summary error:', err);
+      if (familyErrorMessageEl) {
+        if (familyErrorTextEl) {
+          familyErrorTextEl.textContent = err.message || 'Не удалось загрузить семейный профиль';
+        }
+        familyErrorMessageEl.classList.remove('hidden');
+      }
     } finally {
       if (familyLoaderEl) familyLoaderEl.classList.add('hidden');
     }
@@ -710,6 +723,12 @@
       const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${text}`;
       if (tg?.openTelegramLink) tg.openTelegramLink(shareUrl);
       else window.open(shareUrl, '_blank');
+    });
+  }
+
+  if (retryFamilyBtn) {
+    retryFamilyBtn.addEventListener('click', () => {
+      fetchFamilySummary();
     });
   }
 

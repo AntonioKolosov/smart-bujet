@@ -94,6 +94,16 @@
         <p>Загрузка семейного бюджета...</p>
       </div>
 
+      <!-- Error State: Ошибка загрузки -->
+      <div id="familyErrorMessage" class="empty-banner hidden" style="margin: 20px 0; text-align: center;">
+        <div class="empty-icon">⚠️</div>
+        <p class="empty-title" id="familyErrorText">Ошибка загрузки семейного бюджета</p>
+        <span class="empty-desc">Попробуйте обновить страницу или повторить попытку позже</span>
+        <div style="margin-top: 16px;">
+          <button id="retryFamilyBtn" class="primary-btn-sm" style="display: inline-block;">↻ Попробовать снова</button>
+        </div>
+      </div>
+
       <!-- State 1: Single Member (Ожидание партнера) -->
       <div id="familyWaitingState" class="hidden">
         <div class="family-hero-card">

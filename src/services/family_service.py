@@ -1,13 +1,15 @@
 import secrets
 import logging
+from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 from uuid import UUID
-from sqlalchemy import select, or_, desc
+from sqlalchemy import select, or_, desc, func
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user import User
 from src.models.family import FamilyGroup
+from src.models.category import CategoryType
 from src.models.transaction import Transaction
 from src.services.transaction_service import TransactionService
 from src.core.config import settings
@@ -53,14 +55,18 @@ class FamilyService:
         """
         Aggregated Family Summary:
         - Combined liquid balance = sum(member.current_balance)
-        - Combined month expense = sum(member.month_expense)
-        - Combined month income = sum(member.month_income)
+        - Combined month expense = sum(member.month_expense) with intercompany elimination
+        - Combined month income = sum(member.month_income) with intercompany elimination
         - If len(members) < 2 -> state: single_member (invite link visible)
         - If len(members) >= 2 -> state: active_family (invite link HIDDEN)
         """
         group = await self.get_or_create_user_family(user)
 
-        members_query = select(User).where(User.family_group_id == group.id).order_by(User.id == group.owner_id).desc()
+        members_query = (
+            select(User)
+            .where(User.family_group_id == group.id)
+            .order_by(desc(User.id == group.owner_id), User.id)
+        )
         members_res = await self.session.scalars(members_query)
         members: List[User] = members_res.all()
 
@@ -97,6 +103,39 @@ class FamilyService:
         is_active = len(members) >= 2
         status_str = "active_family" if is_active else "single_member"
 
+        # Intercompany elimination: exclude intra-family transfers from combined external family cashflow
+        now = datetime.now(timezone.utc)
+        start_month = datetime(now.year, now.month, 1, 0, 0, 0, tzinfo=timezone.utc)
+        if now.month == 12:
+            next_month = datetime(now.year + 1, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        else:
+            next_month = datetime(now.year, now.month + 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+        intra_family_expense = await self.session.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .where(
+                Transaction.family_group_id == group.id,
+                Transaction.type == CategoryType.expense,
+                Transaction.related_transaction_id.is_not(None),
+                Transaction.transaction_date >= start_month,
+                Transaction.transaction_date < next_month,
+            )
+        ) or 0
+
+        intra_family_income = await self.session.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .where(
+                Transaction.family_group_id == group.id,
+                Transaction.type == CategoryType.income,
+                Transaction.related_transaction_id.is_not(None),
+                Transaction.transaction_date >= start_month,
+                Transaction.transaction_date < next_month,
+            )
+        ) or 0
+
+        consolidated_month_expense = max(0.0, combined_month_expense - float(intra_family_expense))
+        consolidated_month_income = max(0.0, combined_month_income - float(intra_family_income))
+
         return {
             "group_id": group.id,
             "name": group.name,
@@ -106,8 +145,8 @@ class FamilyService:
             "invite_link": self.build_invite_link(group.invite_code) if not is_active else None,
             "member_count": len(members),
             "combined_balance": round(combined_balance, 2),
-            "combined_month_expense": round(combined_month_expense, 2),
-            "combined_month_income": round(combined_month_income, 2),
+            "combined_month_expense": round(consolidated_month_expense, 2),
+            "combined_month_income": round(consolidated_month_income, 2),
             "currency": user.currency or "KZT",
             "month_period_name": month_period_name,
             "members": members_info

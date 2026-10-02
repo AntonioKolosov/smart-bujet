@@ -32,6 +32,7 @@ class Transaction(Base, TimestampMixin):
     asset_account_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("asset_accounts.id"), nullable=True)
     asset_amount: Mapped[Optional[float]] = mapped_column(Numeric(14, 2), nullable=True)
     exchange_rate: Mapped[Optional[float]] = mapped_column(Numeric(12, 4), nullable=True)
+    related_transaction_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True)
     item_name: Mapped[Optional[str]] = mapped_column(String(255))
     raw_text: Mapped[Optional[str]] = mapped_column(Text)
     source: Mapped[TransactionSource] = mapped_column()
@@ -41,6 +42,7 @@ class Transaction(Base, TimestampMixin):
     family_group: Mapped[Optional["FamilyGroup"]] = relationship("FamilyGroup", back_populates="transactions")
     category: Mapped["Category"] = relationship("Category", back_populates="transactions")
     asset_account: Mapped[Optional["AssetAccount"]] = relationship("AssetAccount", back_populates="transactions")
+    related_transaction: Mapped[Optional["Transaction"]] = relationship("Transaction", remote_side="Transaction.id", foreign_keys=[related_transaction_id], post_update=True)
 
     @property
     def category_name(self) -> Optional[str]:

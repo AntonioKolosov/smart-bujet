@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from aiogram.types import MenuButtonWebApp, WebAppInfo, BotCommand
+from sqlalchemy import text
 from src.core.config import settings
 from src.core.database import engine, async_session_maker
 from src.bot.bot import bot, dp
@@ -18,6 +19,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Ensure database schema is up-to-date with non-breaking migrations
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS related_transaction_id UUID REFERENCES transactions(id) ON DELETE SET NULL;"
+        ))
+
     # Seed default system categories
     async with async_session_maker() as session:
         category_service = CategoryService(session)

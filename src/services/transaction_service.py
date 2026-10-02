@@ -1,4 +1,7 @@
 import uuid
+import re
+import asyncio
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, Tuple, List, Any
@@ -16,6 +19,15 @@ from src.services.category_service import CategoryService
 from src.services.asset_service import AssetService
 from src.services.ai_service import AIService
 from src.services.discount_service import DiscountDistributor
+from src.bot.bot import bot
+from src.bot.messages import format_amount
+
+logger = logging.getLogger(__name__)
+
+PARTNER_TRANSFER_REGEX = re.compile(
+    r"\b(?:партнер[а-я]*|жен[а-я]*|муж[а-я]*|супруг[а-я]*|половинк[а-я]*|семь[а-я]*)\b",
+    re.IGNORECASE
+)
 
 
 class TransactionService:
@@ -24,6 +36,102 @@ class TransactionService:
         self.ai_service = ai_service or AIService()
         self.category_service = CategoryService(session)
         self.asset_service = AssetService(session)
+
+    async def _detect_family_partner(self, user: User, text: str, item_name: str) -> Optional[User]:
+        """Detect if the transaction is directed to the user's family partner."""
+        if not user.family_group_id:
+            return None
+
+        partner_query = select(User).where(
+            User.family_group_id == user.family_group_id,
+            User.id != user.id
+        )
+        partner = await self.session.scalar(partner_query)
+        if not partner:
+            return None
+
+        combined_text = f"{text or ''} {item_name or ''}".lower()
+        if PARTNER_TRANSFER_REGEX.search(combined_text):
+            return partner
+
+        if partner.first_name and len(partner.first_name.strip()) >= 2:
+            if partner.first_name.strip().lower() in combined_text:
+                return partner
+
+        if partner.username and len(partner.username.strip()) >= 2:
+            if partner.username.strip().lower().lstrip("@") in combined_text:
+                return partner
+
+        # Contextual check for generic transfer phrases
+        if any(w in combined_text for w in ["партнер", "перевел", "перевела", "скинул", "скинула", "отправил"]):
+            external_keywords = ["сантехник", "друг", "мама", "папа", "брат", "сестр", "клиент", "аренд", "такси", "врач"]
+            if not any(ek in combined_text for ek in external_keywords):
+                return partner
+
+        return None
+
+    async def _handle_intra_family_mirror(
+        self,
+        sender: Optional[User],
+        primary_tx: Transaction,
+        context_text: Optional[str] = None
+    ) -> Optional[User]:
+        """
+        Creates mirror income transaction for family partner if primary transaction is an expense transfer to partner.
+        Returns the partner User if mirrored, else None.
+        """
+        if not sender or not sender.family_group_id:
+            return None
+        if not (primary_tx.category and primary_tx.category.name == "Денежный перевод" and primary_tx.type == CategoryType.expense):
+            return None
+
+        partner = await self._detect_family_partner(sender, context_text or "", primary_tx.item_name or "")
+        if not partner:
+            return None
+
+        action_partner_name = partner.first_name or partner.username or "Партнёр"
+        primary_tx.item_name = f"Перевод: {action_partner_name}"
+
+        mirror_cat = await self._resolve_category("Денежный перевод", CategoryType.income, partner.id)
+        sender_name = sender.first_name or sender.username or "Партнёр"
+        raw_msg = f"Перевод от {sender_name}: {context_text or ''}".strip()
+
+        tx_mirror = Transaction(
+            user_id=partner.id,
+            family_group_id=sender.family_group_id,
+            category_id=mirror_cat.id,
+            amount=primary_tx.amount,
+            type=CategoryType.income,
+            item_name=f"Перевод от: {sender_name}",
+            raw_text=raw_msg,
+            source=TransactionSource.manual,
+        )
+        tx_mirror.category = mirror_cat
+        self.session.add(tx_mirror)
+
+        await self.session.flush()
+        primary_tx.related_transaction_id = tx_mirror.id
+        tx_mirror.related_transaction_id = primary_tx.id
+
+        return partner
+
+    async def _notify_partner_transfer(
+        self,
+        partner_id: int,
+        sender_name: str,
+        amount: float,
+        currency: str
+    ) -> None:
+        """Send instant bot notification to partner about incoming transfer."""
+        try:
+            amt_str = format_amount(amount, currency)
+            text = (
+                f"💰 <b>{sender_name}</b> перевел(а) вам <b>{amt_str}</b>.\n"
+                f"Баланс пополнен!"
+            )
+            await bot.send_message(partner_id, text)
+        except Exception as exc:
+            logger.warning("Failed to send transfer notification to partner %s: %s", partner_id, exc)
 
     async def _get_alias_category(
         self,
@@ -180,6 +288,8 @@ class TransactionService:
         )
 
         transactions: List[Transaction] = []
+        notified_partners: List[Tuple[User, float]] = []
+
         for item in raw_items:
             try:
                 amt = Decimal(str(item.get("amount", 0) or 0))
@@ -240,10 +350,29 @@ class TransactionService:
             await self._save_alias(user_id, normalized_name, category.id)
             transactions.append(tx)
 
+            # Check and handle intra-family transfer mirror
+            partner = await self._handle_intra_family_mirror(user, tx, text)
+            if partner:
+                notified_partners.append((partner, float(amt)))
+
         if not transactions:
             raise InvalidTransactionAmountError("Amount must be greater than 0", raw_text=text)
 
         await self.session.commit()
+
+        # Send async Telegram notification to partner after successful commit
+        for partner, transfer_amount in notified_partners:
+            p_curr = partner.currency or (user.currency if user else "KZT")
+            sender_title = (user.first_name or (f"@{user.username}" if user.username else "Партнёр")) if user else "Партнёр"
+            asyncio.create_task(
+                self._notify_partner_transfer(
+                    partner_id=partner.id,
+                    sender_name=sender_title,
+                    amount=transfer_amount,
+                    currency=p_curr
+                )
+            )
+
         return transactions
 
     async def process_voice(
@@ -282,6 +411,7 @@ class TransactionService:
         )
 
         transactions: List[Transaction] = []
+        notified_partners: List[Tuple[User, float]] = []
         last_raw_text = None
 
         for item in raw_items:
@@ -346,10 +476,29 @@ class TransactionService:
             await self._save_alias(user_id, normalized_name, category.id)
             transactions.append(tx)
 
+            # Check and handle intra-family transfer mirror
+            partner = await self._handle_intra_family_mirror(user, tx, last_raw_text)
+            if partner:
+                notified_partners.append((partner, float(amt)))
+
         if not transactions:
             raise InvalidTransactionAmountError("Amount must be greater than 0", raw_text=last_raw_text)
 
         await self.session.commit()
+
+        # Send async Telegram notification to partner after successful commit
+        for partner, transfer_amount in notified_partners:
+            p_curr = partner.currency or (user.currency if user else "KZT")
+            sender_title = (user.first_name or (f"@{user.username}" if user.username else "Партнёр")) if user else "Партнёр"
+            asyncio.create_task(
+                self._notify_partner_transfer(
+                    partner_id=partner.id,
+                    sender_name=sender_title,
+                    amount=transfer_amount,
+                    currency=p_curr
+                )
+            )
+
         return transactions
 
     async def process_receipt_photo(
