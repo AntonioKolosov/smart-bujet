@@ -32,6 +32,10 @@ class ParserService:
         if re.search(r"(?:скидк|дисконт|акци|-%|off)", text, re.IGNORECASE):
             return None
 
+        # If text mentions income keywords, bypass regex to let AI classify income category and type
+        if re.search(r"(?:зарплат|доход|аванс|преми|подар|пополн|перевод)", text, re.IGNORECASE):
+            return None
+
         # If multiple numbers exist, bypass single-item regex to let AI process multi-item batch
         numbers = re.findall(r"\b\d+(?:[.,]\d+)?\b", text)
         if len(numbers) > 1:

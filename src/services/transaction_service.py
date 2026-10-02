@@ -20,7 +20,12 @@ class TransactionService:
         self.ai_service = ai_service or AIService()
         self.category_service = CategoryService(session)
 
-    async def _get_alias_category(self, user_id: int, item_name: str) -> Optional[Category]:
+    async def _get_alias_category(
+        self,
+        user_id: int,
+        item_name: str,
+        cat_type: Optional[CategoryType] = None
+    ) -> Optional[Category]:
         """Local alias lookup (10-15 ms) without sending requests to Gemini."""
         normalized = item_name.strip().lower()
         query = select(UserItemAlias).where(
@@ -29,8 +34,10 @@ class TransactionService:
         )
         alias = await self.session.scalar(query)
         if alias:
-            alias.usage_count += 1
-            return await self.session.get(Category, alias.category_id)
+            cat = await self.session.get(Category, alias.category_id)
+            if cat and (cat_type is None or cat.type == cat_type):
+                alias.usage_count += 1
+                return cat
         return None
 
     async def _save_alias(self, user_id: int, item_name: str, category_id: int) -> None:
@@ -59,10 +66,8 @@ class TransactionService:
         cat_type: CategoryType,
         user_id: int
     ) -> Category:
-        """Find category by name or fallback to first available category."""
+        """Find category by name strictly respecting cat_type, or fallback to first category of that type."""
         cat = await self.category_service.find_by_name(category_name, cat_type, user_id)
-        if not cat:
-            cat = await self.category_service.find_by_name(category_name, None, user_id)
         if not cat:
             categories = await self.category_service.get_categories(user_id, cat_type)
             cat = categories[0] if categories else None
@@ -119,7 +124,7 @@ class TransactionService:
             normalized_name = ParserService.normalize_item_name(raw_name)
             cat_type = CategoryType(item.get("type", "expense"))
 
-            category = await self._get_alias_category(user_id, normalized_name)
+            category = await self._get_alias_category(user_id, normalized_name, cat_type)
             if not category and item.get("category"):
                 category = await self._resolve_category(item["category"], cat_type, user_id)
             if not category:
@@ -190,11 +195,12 @@ class TransactionService:
                 continue
 
             last_raw_text = item.get("raw_text")
-            raw_name = item.get("item_name") or last_raw_text or "Расход"
-            normalized_name = ParserService.normalize_item_name(raw_name)
             cat_type = CategoryType(item.get("type", "expense"))
+            fallback_name = "Доход" if cat_type == CategoryType.income else "Расход"
+            raw_name = item.get("item_name") or last_raw_text or fallback_name
+            normalized_name = ParserService.normalize_item_name(raw_name)
 
-            category = await self._get_alias_category(user_id, normalized_name)
+            category = await self._get_alias_category(user_id, normalized_name, cat_type)
             if not category and item.get("category"):
                 category = await self._resolve_category(item["category"], cat_type, user_id)
             if not category:
@@ -266,7 +272,7 @@ class TransactionService:
             normalized_name = ParserService.normalize_item_name(raw_name)
             cat_type = CategoryType(item.get("type", "expense"))
 
-            category = await self._get_alias_category(user_id, normalized_name)
+            category = await self._get_alias_category(user_id, normalized_name, cat_type)
             if not category and item.get("category"):
                 category = await self._resolve_category(item["category"], cat_type, user_id)
             if not category:
