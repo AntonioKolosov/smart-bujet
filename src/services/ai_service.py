@@ -10,10 +10,15 @@ from src.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-def normalize_ai_json(raw_text: str) -> List[Dict[str, Any]]:
+def normalize_receipt_payload(raw_text: str) -> Dict[str, Any]:
     """
-    Defensively parse JSON from Gemini and normalize to List[Dict].
-    Handles raw dicts, lists, wrapped keys ('items', 'transactions'), and markdown fences.
+    Parses JSON from Gemini and returns a normalized payload:
+    {
+      "items": List[Dict[str, Any]],
+      "discount_percent": Optional[float],
+      "discount_amount": Optional[float],
+      "total_paid": Optional[float]
+    }
     """
     clean_text = raw_text.strip()
     if clean_text.startswith("```"):
@@ -22,16 +27,26 @@ def normalize_ai_json(raw_text: str) -> List[Dict[str, Any]]:
     try:
         data = json.loads(clean_text)
     except Exception:
-        return []
+        return {"items": []}
 
     if isinstance(data, list):
-        return [item for item in data if isinstance(item, dict)]
+        items = [x for x in data if isinstance(x, dict)]
+        return {"items": items}
     elif isinstance(data, dict):
-        for key in ("transactions", "items", "data", "results"):
+        items = []
+        for key in ("items", "transactions", "data", "results"):
             if isinstance(data.get(key), list):
-                return [item for item in data[key] if isinstance(item, dict)]
-        return [data]
-    return []
+                items = [x for x in data[key] if isinstance(x, dict)]
+                break
+        if not items and "item_name" in data:
+            items = [data]
+        return {
+            "items": items,
+            "discount_percent": data.get("discount_percent"),
+            "discount_amount": data.get("discount_amount"),
+            "total_paid": data.get("total_paid"),
+        }
+    return {"items": []}
 
 
 class AIService:
@@ -44,28 +59,34 @@ class AIService:
         self,
         text: str,
         categories: List[str]
-    ) -> List[Dict[str, Any]]:
-        """
-        Classify text transaction into a list of items (batch processing).
-        Returns: [{"category": str, "amount": float, "item_name": str, "type": "expense"|"income"}, ...]
-        """
+    ) -> Dict[str, Any]:
+        """Classify message into items and optional discount parameters."""
         if not self.client:
-            return [{
-                "category": categories[0] if categories else "Обязательные расходы",
-                "type": "expense",
-                "amount": None,
-                "item_name": text
-            }]
+            return {
+                "items": [{
+                    "category": categories[0] if categories else "Обязательные расходы",
+                    "type": "expense",
+                    "amount": None,
+                    "item_name": text
+                }]
+            }
 
         prompt = (
             f"Ты финансовый ассистент приложения учёта бюджета Smart Bujet.\n"
-            f"Определи ВСЕ позиции транзакций (расходы и доходы) из сообщения пользователя: \"{text}\".\n"
+            f"Определи ВСЕ позиции транзакций (расходы и доходы) и наличие скидки из сообщения: \"{text}\".\n"
             f"Доступные категории: {', '.join(categories)}.\n"
             f"Каждую позицию выдели отдельно. Название позиции (item_name) пиши с заглавной буквы.\n"
-            f"Верни ответ строго в виде JSON-массива объектов со следующими полями:\n"
-            f'[\n'
-            f'  {{"category": "название из списка доступных", "type": "expense" или "income", "amount": число, "item_name": "Название позиции"}}\n'
-            f']\n'
+            f"Если упомянута скидка (например 'скидка 5%', 'скидка 200', 'минус 10%'), обязательно заполни discount_percent или discount_amount.\n"
+            f"Если указана итоговая сумма к оплате, заполни total_paid.\n"
+            f"Верни ответ строго в виде JSON-объекта:\n"
+            f'{{\n'
+            f'  "items": [\n'
+            f'    {{"category": "название из категорий", "type": "expense" или "income", "amount": число, "item_name": "Название позиции"}}\n'
+            f'  ],\n'
+            f'  "discount_percent": число_или_null,\n'
+            f'  "discount_amount": число_или_null,\n'
+            f'  "total_paid": число_или_null\n'
+            f'}}\n'
         )
 
         try:
@@ -77,33 +98,37 @@ class AIService:
                     temperature=0.1
                 )
             )
-            return normalize_ai_json(response.text)
+            return normalize_receipt_payload(response.text)
         except Exception as exc:
             logger.error("AI classify_text failed: %s", exc)
-            return []
+            return {"items": []}
 
     async def parse_voice(
         self,
         audio_bytes: bytes,
         mime_type: str,
         categories: List[str]
-    ) -> List[Dict[str, Any]]:
-        """
-        In-memory voice message processing via types.Part.from_bytes.
-        Extracts all mentioned items.
-        """
+    ) -> Dict[str, Any]:
+        """In-memory voice message processing with discount extraction."""
         if not self.client:
-            return []
+            return {"items": []}
 
         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
         prompt = (
-            f"Прослушай аудиосообщение и выдели ВСЕ упомянутые расходы и доходы.\n"
+            f"Прослушай аудиосообщение и выдели ВСЕ упомянутые расходы и доходы, а также скидки.\n"
             f"Доступные категории: {', '.join(categories)}.\n"
             f"Каждую позицию выдели отдельно. Название каждой позиции (item_name) пиши с заглавной буквы.\n"
-            f"Верни ответ строго в виде JSON-массива объектов со следующими полями:\n"
-            f'[\n'
-            f'  {{"category": "название из категорий", "type": "expense" или "income", "amount": число, "item_name": "Название позиции", "raw_text": "распознанный текст"}}\n'
-            f']\n'
+            f"Если названа скидка (например 'скидка 5%', 'скидка 249 тенге', 'минус 10%'), обязательно укажи discount_percent или discount_amount.\n"
+            f"Если назван общий итог к оплате ('всего вышло 4733'), укажи total_paid.\n"
+            f"Верни ответ строго в виде JSON-объекта:\n"
+            f'{{\n'
+            f'  "items": [\n'
+            f'    {{"category": "название из категорий", "type": "expense" или "income", "amount": число, "item_name": "Название позиции", "raw_text": "распознанный текст"}}\n'
+            f'  ],\n'
+            f'  "discount_percent": число_или_null,\n'
+            f'  "discount_amount": число_или_null,\n'
+            f'  "total_paid": число_или_null\n'
+            f'}}\n'
         )
 
         try:
@@ -115,33 +140,37 @@ class AIService:
                     temperature=0.1
                 )
             )
-            return normalize_ai_json(response.text)
+            return normalize_receipt_payload(response.text)
         except Exception as exc:
             logger.error("AI parse_voice failed: %s", exc)
-            return []
+            return {"items": []}
 
     async def parse_receipt_photo(
         self,
         image_bytes: bytes,
         mime_type: str,
         categories: List[str]
-    ) -> List[Dict[str, Any]]:
-        """
-        In-memory receipt photo processing via types.Part.from_bytes.
-        Extracts receipt totals or items.
-        """
+    ) -> Dict[str, Any]:
+        """In-memory receipt photo processing with discount and total extraction."""
         if not self.client:
-            return []
+            return {"items": []}
 
         image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
         prompt = (
             f"Проанализируй фотографию чека/квитанции.\n"
             f"Доступные категории: {', '.join(categories)}.\n"
-            f"Извлеки итоговую сумму или отдельные позиции чека. Название позиции (item_name) пиши с заглавной буквы.\n"
-            f"Верни ответ строго в виде JSON-массива объектов:\n"
-            f'[\n'
-            f'  {{"category": "название из категорий", "type": "expense", "amount": число, "item_name": "Название магазина или товара"}}\n'
-            f']\n'
+            f"1. Извлеки все отдельные товарные позиции чека с их исходными ценами/суммами (item_name с заглавной буквы).\n"
+            f"2. Если на чеке указана общая скидка чека (в процентах или фиксированной суммой, строка 'СКИДКА', 'ДИСКОНТ', 'БОНУСЫ'), обязательно укажи discount_percent и/или discount_amount.\n"
+            f"3. В total_paid укажи итоговую фактически оплаченную сумму (строка 'ИТОГ', 'К ОПЛАТЕ', 'TOTAL').\n"
+            f"Верни ответ строго в виде JSON-объекта:\n"
+            f'{{\n'
+            f'  "items": [\n'
+            f'    {{"category": "название из категорий", "type": "expense", "amount": число, "item_name": "Название товара/услуги"}}\n'
+            f'  ],\n'
+            f'  "discount_percent": число_или_null,\n'
+            f'  "discount_amount": число_или_null,\n'
+            f'  "total_paid": число_или_null\n'
+            f'}}\n'
         )
 
         try:
@@ -153,8 +182,8 @@ class AIService:
                     temperature=0.1
                 )
             )
-            return normalize_ai_json(response.text)
+            return normalize_receipt_payload(response.text)
         except Exception as exc:
             logger.error("AI parse_receipt_photo failed: %s", exc)
-            return []
+            return {"items": []}
 

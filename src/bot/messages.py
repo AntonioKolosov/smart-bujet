@@ -38,9 +38,16 @@ class BotMessages:
             icon = "💸" if tx.type == CategoryType.expense else "💰"
             type_label = "Расход" if tx.type == CategoryType.expense else "Доход"
             cat_name = tx.category.name if tx.category else "Общее"
+
+            amount_str = f"<b>{format_amount(tx.amount, currency)}</b>"
+            discount_line = ""
+            if tx.discount_amount and tx.discount_amount > 0 and tx.original_amount:
+                amount_str += f" <s>{format_amount(tx.original_amount, currency)}</s>"
+                discount_line = f"\n🏷️ <b>Скидка</b>: -{format_amount(tx.discount_amount, currency)}"
+
             return (
                 f"✅ <b>Записано!</b>\n\n"
-                f"{icon} <b>{type_label}</b>: <b>{format_amount(tx.amount, currency)}</b>\n"
+                f"{icon} <b>{type_label}</b>: {amount_str}{discount_line}\n"
                 f"📌 Позиция: <b>{tx.item_name}</b>\n"
                 f"📁 Категория: <b>{cat_name}</b>"
             )
@@ -49,22 +56,34 @@ class BotMessages:
         lines = [f"✅ <b>Записано ({len(tx_list)} поз.)!</b>\n"]
         total_expense = 0.0
         total_income = 0.0
+        total_discount = 0.0
 
         for i, tx in enumerate(tx_list, start=1):
             icon = "💸" if tx.type == CategoryType.expense else "💰"
             cat_name = tx.category.name if tx.category else "Общее"
-            lines.append(f"{i}. {icon} <b>{tx.item_name}</b> — {format_amount(tx.amount, currency)} (<i>{cat_name}</i>)")
+            if tx.discount_amount and tx.discount_amount > 0 and tx.original_amount:
+                lines.append(
+                    f"{i}. {icon} <b>{tx.item_name}</b> — {format_amount(tx.amount, currency)} "
+                    f"<s>{format_amount(tx.original_amount, currency)}</s> (<i>{cat_name}</i>)"
+                )
+                total_discount += float(tx.discount_amount)
+            else:
+                lines.append(f"{i}. {icon} <b>{tx.item_name}</b> — {format_amount(tx.amount, currency)} (<i>{cat_name}</i>)")
+
             if tx.type == CategoryType.expense:
                 total_expense += float(tx.amount)
             else:
                 total_income += float(tx.amount)
 
         lines.append("")
+        if total_discount > 0:
+            lines.append(f"🏷️ Общая скидка: <b>-{format_amount(total_discount, currency)}</b>")
+
         if total_expense > 0 and total_income > 0:
             lines.append(f"💸 Итого расходов: <b>{format_amount(total_expense, currency)}</b>")
             lines.append(f"💰 Итого доходов: <b>{format_amount(total_income, currency)}</b>")
         elif total_expense > 0:
-            lines.append(f"💰 <b>Итого: {format_amount(total_expense, currency)}</b>")
+            lines.append(f"💰 <b>К оплате: {format_amount(total_expense, currency)}</b>")
         else:
             lines.append(f"💰 <b>Итого: {format_amount(total_income, currency)}</b>")
 

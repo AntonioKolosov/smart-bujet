@@ -26,6 +26,8 @@ class Transaction(Base, TimestampMixin):
     family_group_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("family_groups.id"))
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
     amount: Mapped[float] = mapped_column(Numeric(12, 2))
+    original_amount: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)
+    discount_amount: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)
     type: Mapped[CategoryType] = mapped_column()
     item_name: Mapped[Optional[str]] = mapped_column(String(255))
     raw_text: Mapped[Optional[str]] = mapped_column(Text)

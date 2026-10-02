@@ -28,6 +28,10 @@ class ParserService:
         if not text:
             return None
 
+        # If text mentions discount, bypass single-item regex to let AI process discount
+        if re.search(r"(?:скидк|дисконт|акци|-%|off)", text, re.IGNORECASE):
+            return None
+
         # If multiple numbers exist, bypass single-item regex to let AI process multi-item batch
         numbers = re.findall(r"\b\d+(?:[.,]\d+)?\b", text)
         if len(numbers) > 1:

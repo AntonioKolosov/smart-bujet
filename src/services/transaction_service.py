@@ -11,6 +11,7 @@ from src.core.exceptions import InvalidTransactionAmountError, TransactionParseE
 from src.services.parser_service import ParserService
 from src.services.category_service import CategoryService
 from src.services.ai_service import AIService
+from src.services.discount_service import DiscountDistributor
 
 
 class TransactionService:
@@ -78,6 +79,9 @@ class TransactionService:
 
         parsed = ParserService.parse_text(text)
         raw_items: List[dict] = []
+        discount_percent = None
+        discount_amount = None
+        total_paid = None
 
         if parsed:
             amount, item_name = parsed
@@ -85,10 +89,21 @@ class TransactionService:
         else:
             available_cats = await self.category_service.get_categories(user_id)
             cat_names = list({c.name for c in available_cats})
-            raw_items = await self.ai_service.classify_text(text, cat_names)
+            payload = await self.ai_service.classify_text(text, cat_names)
+            raw_items = payload.get("items", [])
+            discount_percent = payload.get("discount_percent")
+            discount_amount = payload.get("discount_amount")
+            total_paid = payload.get("total_paid")
 
         if not raw_items:
             raise TransactionParseError("Could not parse transaction from message")
+
+        raw_items = DiscountDistributor.distribute(
+            raw_items,
+            discount_percent=discount_percent,
+            discount_amount=discount_amount,
+            total_paid=total_paid,
+        )
 
         transactions: List[Transaction] = []
         for item in raw_items:
@@ -111,11 +126,16 @@ class TransactionService:
                 cats = await self.category_service.get_categories(user_id, cat_type)
                 category = cats[0]
 
+            orig_amt = item.get("original_amount")
+            disc_amt = item.get("discount_amount")
+
             tx = Transaction(
                 user_id=user_id,
                 family_group_id=family_group_id,
                 category_id=category.id,
                 amount=float(amt),
+                original_amount=float(orig_amt) if orig_amt is not None else None,
+                discount_amount=float(disc_amt) if disc_amt is not None else None,
                 type=cat_type,
                 item_name=normalized_name,
                 raw_text=text,
@@ -145,9 +165,17 @@ class TransactionService:
         available_cats = await self.category_service.get_categories(user_id)
         cat_names = list({c.name for c in available_cats})
 
-        raw_items = await self.ai_service.parse_voice(audio_bytes, mime_type, cat_names)
+        payload = await self.ai_service.parse_voice(audio_bytes, mime_type, cat_names)
+        raw_items = payload.get("items", [])
         if not raw_items:
             raise TransactionParseError("Could not parse voice transaction")
+
+        raw_items = DiscountDistributor.distribute(
+            raw_items,
+            discount_percent=payload.get("discount_percent"),
+            discount_amount=payload.get("discount_amount"),
+            total_paid=payload.get("total_paid"),
+        )
 
         transactions: List[Transaction] = []
         last_raw_text = None
@@ -173,11 +201,16 @@ class TransactionService:
                 cats = await self.category_service.get_categories(user_id, cat_type)
                 category = cats[0]
 
+            orig_amt = item.get("original_amount")
+            disc_amt = item.get("discount_amount")
+
             tx = Transaction(
                 user_id=user_id,
                 family_group_id=family_group_id,
                 category_id=category.id,
                 amount=float(amt),
+                original_amount=float(orig_amt) if orig_amt is not None else None,
+                discount_amount=float(disc_amt) if disc_amt is not None else None,
                 type=cat_type,
                 item_name=normalized_name,
                 raw_text=last_raw_text,
@@ -207,9 +240,17 @@ class TransactionService:
         available_cats = await self.category_service.get_categories(user_id)
         cat_names = list({c.name for c in available_cats})
 
-        raw_items = await self.ai_service.parse_receipt_photo(image_bytes, mime_type, cat_names)
+        payload = await self.ai_service.parse_receipt_photo(image_bytes, mime_type, cat_names)
+        raw_items = payload.get("items", [])
         if not raw_items:
             raise TransactionParseError("Could not parse receipt photo")
+
+        raw_items = DiscountDistributor.distribute(
+            raw_items,
+            discount_percent=payload.get("discount_percent"),
+            discount_amount=payload.get("discount_amount"),
+            total_paid=payload.get("total_paid"),
+        )
 
         transactions: List[Transaction] = []
         for item in raw_items:
@@ -232,11 +273,16 @@ class TransactionService:
                 cats = await self.category_service.get_categories(user_id, cat_type)
                 category = cats[0]
 
+            orig_amt = item.get("original_amount")
+            disc_amt = item.get("discount_amount")
+
             tx = Transaction(
                 user_id=user_id,
                 family_group_id=family_group_id,
                 category_id=category.id,
                 amount=float(amt),
+                original_amount=float(orig_amt) if orig_amt is not None else None,
+                discount_amount=float(disc_amt) if disc_amt is not None else None,
                 type=cat_type,
                 item_name=normalized_name,
                 raw_text="[Фото чека]",
