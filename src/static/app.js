@@ -413,7 +413,13 @@
   }
 
   // --- Modals Logic ---
+  const addAssetErrorEl = document.getElementById('addAssetError');
+  const addAssetSubmitBtn = document.getElementById('addAssetSubmitBtn');
+  const actionModalErrorEl = document.getElementById('actionModalError');
+  const actionSubmitBtn = document.getElementById('actionSubmitBtn');
+
   addAssetBtn.addEventListener('click', () => {
+    if (addAssetErrorEl) addAssetErrorEl.classList.add('hidden');
     addAssetModal.classList.remove('hidden');
   });
 
@@ -430,6 +436,12 @@
     const rateVal = document.getElementById('assetRateInput').value;
     const interest_rate = rateVal ? Number(rateVal) : null;
 
+    if (addAssetErrorEl) addAssetErrorEl.classList.add('hidden');
+    if (addAssetSubmitBtn) {
+      addAssetSubmitBtn.disabled = true;
+      addAssetSubmitBtn.textContent = 'Создание...';
+    }
+
     try {
       const res = await fetch('/api/v1/assets/', {
         method: 'POST',
@@ -442,11 +454,27 @@
         await fetchProfile();
         await fetchAssets();
       } else {
-        const err = await res.json();
-        alert(err.detail || 'Не удалось создать счёт');
+        const err = await res.json().catch(() => ({}));
+        const errMsg = err.detail || 'Не удалось создать счёт';
+        if (addAssetErrorEl) {
+          addAssetErrorEl.textContent = errMsg;
+          addAssetErrorEl.classList.remove('hidden');
+        } else {
+          alert(errMsg);
+        }
       }
     } catch (err) {
-      alert('Ошибка при создании счёта');
+      if (addAssetErrorEl) {
+        addAssetErrorEl.textContent = 'Ошибка при создании счёта: ' + (err.message || '');
+        addAssetErrorEl.classList.remove('hidden');
+      } else {
+        alert('Ошибка при создании счёта');
+      }
+    } finally {
+      if (addAssetSubmitBtn) {
+        addAssetSubmitBtn.disabled = false;
+        addAssetSubmitBtn.textContent = 'Создать счёт';
+      }
     }
   });
 
@@ -454,6 +482,7 @@
     actionAssetIdInput.value = account.id;
     actionTypeInput.value = type;
     actionAmountInput.value = '';
+    if (actionModalErrorEl) actionModalErrorEl.classList.add('hidden');
 
     if (type === 'deposit') {
       actionModalTitle.textContent = `Пополнить: ${account.name}`;
@@ -476,9 +505,21 @@
     const actionType = actionTypeInput.value;
     const amount = Number(actionAmountInput.value);
 
+    if (actionModalErrorEl) actionModalErrorEl.classList.add('hidden');
+
     if (!amount || amount <= 0) {
-      alert('Укажите корректную сумму');
+      if (actionModalErrorEl) {
+        actionModalErrorEl.textContent = 'Укажите корректную сумму';
+        actionModalErrorEl.classList.remove('hidden');
+      } else {
+        alert('Укажите корректную сумму');
+      }
       return;
+    }
+
+    if (actionSubmitBtn) {
+      actionSubmitBtn.disabled = true;
+      actionSubmitBtn.textContent = 'Обработка...';
     }
 
     try {
@@ -494,11 +535,27 @@
         await fetchAssets();
         await fetchTransactions();
       } else {
-        const err = await res.json();
-        alert(err.detail || 'Ошибка выполнения операции');
+        const err = await res.json().catch(() => ({}));
+        const errMsg = err.detail || 'Ошибка выполнения операции';
+        if (actionModalErrorEl) {
+          actionModalErrorEl.textContent = errMsg;
+          actionModalErrorEl.classList.remove('hidden');
+        } else {
+          alert(errMsg);
+        }
       }
     } catch (err) {
-      alert('Ошибка соединения с сервером');
+      if (actionModalErrorEl) {
+        actionModalErrorEl.textContent = 'Ошибка соединения с сервером';
+        actionModalErrorEl.classList.remove('hidden');
+      } else {
+        alert('Ошибка соединения с сервером');
+      }
+    } finally {
+      if (actionSubmitBtn) {
+        actionSubmitBtn.disabled = false;
+        actionSubmitBtn.textContent = 'Подтвердить';
+      }
     }
   });
 

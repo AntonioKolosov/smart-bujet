@@ -97,6 +97,7 @@
         <button id="closeAddModalBtn" class="close-btn">&times;</button>
       </div>
       <form id="addAssetForm" class="modal-form">
+        <div id="addAssetError" class="error-banner hidden" style="margin-bottom: 0;"></div>
         <label class="form-label">
           Название
           <input type="text" id="assetNameInput" class="form-input" placeholder="Например: Kaspi Депозит или Сейф USD" required />
@@ -131,7 +132,7 @@
             <input type="number" step="0.1" id="assetRateInput" class="form-input" placeholder="например 14.5" />
           </label>
         </div>
-        <button type="submit" class="modal-submit-btn">Создать счёт</button>
+        <button type="submit" id="addAssetSubmitBtn" class="modal-submit-btn">Создать счёт</button>
       </form>
     </div>
   </div>
@@ -144,6 +145,7 @@
         <button id="closeActionModalBtn" class="close-btn">&times;</button>
       </div>
       <form id="actionForm" class="modal-form">
+        <div id="actionModalError" class="error-banner hidden" style="margin-bottom: 0;"></div>
         <input type="hidden" id="actionAssetId" />
         <input type="hidden" id="actionType" value="deposit" />
         <p class="action-desc" id="actionModalDesc">Перевод средств с текущего баланса</p>

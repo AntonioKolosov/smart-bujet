@@ -389,12 +389,24 @@ body {
   padding: 20px;
 }
 
+/* Number input spinner removal for sleek dark theme */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
 .modal-content {
   background: var(--secondary-bg-color);
   border-radius: 20px;
-  padding: 24px;
+  padding: 22px;
   width: 100%;
-  max-width: 440px;
+  max-width: 420px;
+  box-sizing: border-box;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 
@@ -423,6 +435,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .form-label {
@@ -432,12 +446,17 @@ body {
   font-size: 0.85rem;
   color: var(--hint-color);
   font-weight: 500;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .form-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .form-input, .form-select {
@@ -448,6 +467,9 @@ body {
   padding: 10px 14px;
   font-size: 0.95rem;
   outline: none;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .form-input:focus, .form-select:focus {
