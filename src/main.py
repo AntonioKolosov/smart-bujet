@@ -33,6 +33,10 @@ async def lifespan(app: FastAPI):
                 domain = f"{domain}:8443"
             miniapp_url = f"https://{domain}/app"
 
+            me = await bot.get_me()
+            if me and me.username:
+                settings.bot_username = me.username
+
             await bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(
                     text="Menu",
@@ -42,6 +46,7 @@ async def lifespan(app: FastAPI):
             await bot.set_my_commands([
                 BotCommand(command="miniapp", description="Открыть журнал транзакций"),
                 BotCommand(command="deposits", description="Депозиты и сбережения"),
+                BotCommand(command="family", description="Семейный бюджет"),
                 BotCommand(command="start", description="Перезапустить бота"),
             ])
             logger.info("Chat menu button and bot commands successfully registered: %s", miniapp_url)

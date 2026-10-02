@@ -87,6 +87,90 @@
 
       <main id="assetsList" class="assets-list"></main>
     </section>
+    <!-- Tab 3: Family (Семейный бюджет) -->
+    <section id="tab-family" class="tab-pane">
+      <div id="familyLoader" class="loader-container">
+        <div class="spinner"></div>
+        <p>Загрузка семейного бюджета...</p>
+      </div>
+
+      <!-- State 1: Single Member (Ожидание партнера) -->
+      <div id="familyWaitingState" class="hidden">
+        <div class="family-hero-card">
+          <div class="family-hero-icon">👨‍👩‍👧‍👦</div>
+          <h2 class="family-hero-title">Семейный бюджет</h2>
+          <p class="family-hero-desc">
+            Объедините финансовый учет со второй половинкой. Вы будете видеть общие расходы, доходы и совместный баланс в реальном времени.
+          </p>
+
+          <div class="invite-box">
+            <label class="invite-label">Ваша ссылка для приглашения партнера:</label>
+            <div class="invite-input-wrap">
+              <input type="text" id="familyInviteInput" class="invite-input" readonly />
+            </div>
+            <div class="invite-actions">
+              <button id="copyInviteBtn" class="primary-btn-sm">📋 Скопировать</button>
+              <button id="shareInviteBtn" class="share-btn-sm">✈️ В Telegram</button>
+            </div>
+            <span id="copyToast" class="copy-toast hidden">Ссылка скопирована в буфер!</span>
+          </div>
+
+          <div class="family-rules-card">
+            <div class="rule-item">
+              <span class="rule-icon">🔒</span>
+              <div class="rule-text"><b>Личное пространство:</b> каждый записывает чеки в своем боте как обычно.</div>
+            </div>
+            <div class="rule-item">
+              <span class="rule-icon">📊</span>
+              <div class="rule-text"><b>Суммарный баланс:</b> семейный бюджет считается как сумма балансов двух людей.</div>
+            </div>
+            <div class="rule-item">
+              <span class="rule-icon">🏷</span>
+              <div class="rule-text"><b>Прозрачная лента:</b> в совместной истории сразу видно, кто именно совершил трату.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- State 2: Active Family (Два участника, ссылка СКРЫТА) -->
+      <div id="familyActiveState" class="hidden">
+        <!-- Совместный баланс -->
+        <div class="header-balance-card family-balance-card">
+          <span class="balance-label" id="familyGroupName">Семейный бюджет</span>
+          <span class="balance-value" id="familyCombinedBalance">0 ₸</span>
+        </div>
+
+        <!-- Совместный расход и доход за месяц -->
+        <div class="header-summary">
+          <div class="summary-card">
+            <span class="summary-label" id="familyExpenseLabel">Расход семьи (месяц)</span>
+            <span class="summary-value expense" id="familyTotalExpense">0 ₸</span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-label" id="familyIncomeLabel">Доход семьи (месяц)</span>
+            <span class="summary-value income" id="familyTotalIncome">0 ₸</span>
+          </div>
+        </div>
+
+        <!-- Карточки партнеров -->
+        <div class="toolbar">
+          <h3 class="section-title">Партнеры и балансы</h3>
+        </div>
+        <div id="familyMembersGrid" class="family-members-grid"></div>
+
+        <!-- Совместная история операций -->
+        <div class="toolbar">
+          <h3 class="section-title">Общая история операций</h3>
+          <button id="refreshFamilyBtn" class="refresh-btn" title="Обновить">↻</button>
+        </div>
+        <main id="familyTxList" class="tx-list"></main>
+
+        <!-- Покинуть группу -->
+        <div class="family-footer-actions">
+          <button id="leaveFamilyBtn" class="leave-btn">Покинуть семейную группу</button>
+        </div>
+      </div>
+    </section>
   </div>
 
   <!-- Modal: Add Asset -->
@@ -167,6 +251,10 @@
     <button class="nav-item" id="navAssetsBtn" data-tab="tab-assets">
       <span class="nav-icon">🏦</span>
       <span class="nav-text">Депозиты</span>
+    </button>
+    <button class="nav-item" id="navFamilyBtn" data-tab="tab-family">
+      <span class="nav-icon">👨‍👩‍👧‍👦</span>
+      <span class="nav-text">Семья</span>
     </button>
   </nav>
 

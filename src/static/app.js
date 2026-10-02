@@ -49,8 +49,27 @@
   const currencyBadgeEl = document.getElementById('currencyBadge');
   const navOpsBtn = document.getElementById('navOpsBtn');
   const navAssetsBtn = document.getElementById('navAssetsBtn');
+  const navFamilyBtn = document.getElementById('navFamilyBtn');
   const tabOps = document.getElementById('tab-operations');
   const tabAssets = document.getElementById('tab-assets');
+  const tabFamily = document.getElementById('tab-family');
+
+  // DOM Elements - Family Tab
+  const familyLoaderEl = document.getElementById('familyLoader');
+  const familyWaitingStateEl = document.getElementById('familyWaitingState');
+  const familyActiveStateEl = document.getElementById('familyActiveState');
+  const familyInviteInput = document.getElementById('familyInviteInput');
+  const copyInviteBtn = document.getElementById('copyInviteBtn');
+  const shareInviteBtn = document.getElementById('shareInviteBtn');
+  const copyToastEl = document.getElementById('copyToast');
+  const familyGroupNameEl = document.getElementById('familyGroupName');
+  const familyCombinedBalanceEl = document.getElementById('familyCombinedBalance');
+  const familyTotalExpenseEl = document.getElementById('familyTotalExpense');
+  const familyTotalIncomeEl = document.getElementById('familyTotalIncome');
+  const familyMembersGridEl = document.getElementById('familyMembersGrid');
+  const familyTxListEl = document.getElementById('familyTxList');
+  const refreshFamilyBtn = document.getElementById('refreshFamilyBtn');
+  const leaveFamilyBtn = document.getElementById('leaveFamilyBtn');
 
   // DOM Elements - Operations Tab
   const currentBalanceEl = document.getElementById('currentBalance');
@@ -129,22 +148,26 @@
 
   // --- Tab Navigation ---
   function switchTab(tabId) {
-    if (tabId === 'tab-assets') {
-      tabOps.classList.remove('active');
-      tabAssets.classList.add('active');
-      navOpsBtn.classList.remove('active');
-      navAssetsBtn.classList.add('active');
+    [tabOps, tabAssets, tabFamily].forEach(t => t && t.classList.remove('active'));
+    [navOpsBtn, navAssetsBtn, navFamilyBtn].forEach(b => b && b.classList.remove('active'));
+
+    if (tabId === 'tab-family') {
+      if (tabFamily) tabFamily.classList.add('active');
+      if (navFamilyBtn) navFamilyBtn.classList.add('active');
+      fetchFamilySummary();
+    } else if (tabId === 'tab-assets') {
+      if (tabAssets) tabAssets.classList.add('active');
+      if (navAssetsBtn) navAssetsBtn.classList.add('active');
       fetchAssets();
     } else {
-      tabAssets.classList.remove('active');
-      tabOps.classList.add('active');
-      navAssetsBtn.classList.remove('active');
-      navOpsBtn.classList.add('active');
+      if (tabOps) tabOps.classList.add('active');
+      if (navOpsBtn) navOpsBtn.classList.add('active');
     }
   }
 
-  navOpsBtn.addEventListener('click', () => switchTab('tab-operations'));
-  navAssetsBtn.addEventListener('click', () => switchTab('tab-assets'));
+  if (navOpsBtn) navOpsBtn.addEventListener('click', () => switchTab('tab-operations'));
+  if (navAssetsBtn) navAssetsBtn.addEventListener('click', () => switchTab('tab-assets'));
+  if (navFamilyBtn) navFamilyBtn.addEventListener('click', () => switchTab('tab-family'));
 
   // --- Data Fetching ---
   async function fetchProfile() {
@@ -554,13 +577,171 @@
     }
   });
 
+  // --- Family Budget Logic ---
+  async function fetchFamilySummary() {
+    if (!familyLoaderEl) return;
+    familyLoaderEl.classList.remove('hidden');
+    if (familyWaitingStateEl) familyWaitingStateEl.classList.add('hidden');
+    if (familyActiveStateEl) familyActiveStateEl.classList.add('hidden');
+
+    try {
+      const res = await fetch('/api/v1/family/summary', { headers: getHeaders() });
+      if (!res.ok) throw new Error('Ошибка загрузки семейного профиля');
+      const data = await res.json();
+
+      if (data.status === 'single_member') {
+        // State 1: Single member (invite link visible)
+        if (familyInviteInput) familyInviteInput.value = data.invite_link || '';
+        if (familyWaitingStateEl) familyWaitingStateEl.classList.remove('hidden');
+      } else {
+        // State 2: Active family (invite link hidden)
+        if (familyGroupNameEl) familyGroupNameEl.textContent = data.name || 'Семейный бюджет';
+        if (familyCombinedBalanceEl) familyCombinedBalanceEl.textContent = formatMoney(data.combined_balance, data.currency);
+        if (familyTotalExpenseEl) familyTotalExpenseEl.textContent = formatMoney(data.combined_month_expense, data.currency);
+        if (familyTotalIncomeEl) familyTotalIncomeEl.textContent = formatMoney(data.combined_month_income, data.currency);
+
+        renderFamilyMembers(data.members, data.currency);
+        await fetchFamilyTransactions();
+        if (familyActiveStateEl) familyActiveStateEl.classList.remove('hidden');
+      }
+    } catch (err) {
+      console.error('Family summary error:', err);
+    } finally {
+      if (familyLoaderEl) familyLoaderEl.classList.add('hidden');
+    }
+  }
+
+  function renderFamilyMembers(members, defaultCurr) {
+    if (!familyMembersGridEl) return;
+    familyMembersGridEl.innerHTML = '';
+    (members || []).forEach(m => {
+      const card = document.createElement('div');
+      card.className = `member-card ${m.is_current_user ? 'self' : 'partner'}`;
+      card.innerHTML = `
+        <div class="member-header">
+          <span class="member-name">${m.first_name || 'Участник'}</span>
+          <span class="member-badge">${m.is_current_user ? 'Вы' : 'Партнёр'}</span>
+        </div>
+        <div class="member-balance">${formatMoney(m.current_balance, m.currency || defaultCurr)}</div>
+        <div class="member-stats">
+          <span>Расход: <b>${formatMoney(m.month_expense, m.currency || defaultCurr)}</b></span>
+        </div>
+      `;
+      familyMembersGridEl.appendChild(card);
+    });
+  }
+
+  async function fetchFamilyTransactions() {
+    if (!familyTxListEl) return;
+    try {
+      const res = await fetch('/api/v1/family/transactions?limit=60', { headers: getHeaders() });
+      if (!res.ok) return;
+      const txs = await res.json();
+      renderFamilyTransactions(txs);
+    } catch (e) {
+      console.error('Family transactions error:', e);
+    }
+  }
+
+  function renderFamilyTransactions(transactions) {
+    if (!familyTxListEl) return;
+    familyTxListEl.innerHTML = '';
+    if (!transactions || !transactions.length) {
+      familyTxListEl.innerHTML = `
+        <div class="empty-banner" style="padding: 30px 20px;">
+          <div class="empty-icon">🧾</div>
+          <p class="empty-title">Семейных транзакций пока нет</p>
+          <span class="empty-desc">Любая трата или доход партнеров появится здесь автоматически</span>
+        </div>
+      `;
+      return;
+    }
+
+    transactions.forEach(tx => {
+      const el = document.createElement('div');
+      el.className = 'tx-item';
+      const isInc = tx.type === 'income';
+      const authorClass = tx.is_current_user ? 'author-self' : 'author-partner';
+
+      el.innerHTML = `
+        <div class="tx-main">
+          <div class="tx-top-row">
+            <span class="tx-title">${tx.item_name || tx.category_name || 'Операция'}</span>
+            <span class="author-tag ${authorClass}">${tx.author_name}</span>
+          </div>
+          <div class="tx-sub-row">
+            <span class="tx-date">${formatDateGroup(tx.transaction_date)} • ${formatTime(tx.transaction_date)}</span>
+            <span class="tx-cat-chip">${tx.category_name || ''}</span>
+          </div>
+        </div>
+        <div class="tx-amount ${isInc ? 'income' : 'expense'}">
+          ${isInc ? '+' : '-'}${formatMoney(tx.amount)}
+        </div>
+      `;
+      familyTxListEl.appendChild(el);
+    });
+  }
+
+  if (copyInviteBtn) {
+    copyInviteBtn.addEventListener('click', () => {
+      if (!familyInviteInput) return;
+      navigator.clipboard.writeText(familyInviteInput.value).then(() => {
+        if (copyToastEl) {
+          copyToastEl.classList.remove('hidden');
+          setTimeout(() => copyToastEl.classList.add('hidden'), 2500);
+        }
+        if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+      }).catch(() => {
+        familyInviteInput.select();
+        document.execCommand('copy');
+        if (copyToastEl) {
+          copyToastEl.classList.remove('hidden');
+          setTimeout(() => copyToastEl.classList.add('hidden'), 2500);
+        }
+      });
+    });
+  }
+
+  if (shareInviteBtn) {
+    shareInviteBtn.addEventListener('click', () => {
+      if (!familyInviteInput) return;
+      const url = familyInviteInput.value;
+      const text = encodeURIComponent('Привет! Давай вести совместный семейный бюджет в Smart Bujet:');
+      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${text}`;
+      if (tg?.openTelegramLink) tg.openTelegramLink(shareUrl);
+      else window.open(shareUrl, '_blank');
+    });
+  }
+
+  if (refreshFamilyBtn) {
+    refreshFamilyBtn.addEventListener('click', () => {
+      fetchFamilySummary();
+    });
+  }
+
+  if (leaveFamilyBtn) {
+    leaveFamilyBtn.addEventListener('click', async () => {
+      if (!confirm('Вы уверены, что хотите выйти из семейной группы? Совместный бюджет больше не будет синхронизироваться.')) return;
+      try {
+        const res = await fetch('/api/v1/family/leave', { method: 'POST', headers: getHeaders() });
+        if (res.ok) {
+          await fetchFamilySummary();
+        } else {
+          alert('Не удалось покинуть группу');
+        }
+      } catch (e) {
+        alert('Ошибка соединения с сервером');
+      }
+    });
+  }
+
   refreshBtn.addEventListener('click', () => {
     fetchProfile();
     fetchTransactions();
     fetchAssets();
   });
 
-  // Check URL params for deep linking (e.g. ?page=deposits)
+  // Check URL params for deep linking (e.g. ?page=deposits, ?page=family)
   const urlParams = new URLSearchParams(window.location.search);
   const initialPage = urlParams.get('page') || window.location.hash.replace('#', '');
 
@@ -569,6 +750,8 @@
     fetchTransactions();
     if (initialPage === 'deposits' || initialPage === 'assets') {
       switchTab('tab-assets');
+    } else if (initialPage === 'family' || initialPage === 'fam') {
+      switchTab('tab-family');
     }
   });
 })();

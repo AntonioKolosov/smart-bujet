@@ -589,3 +589,116 @@ input[type="number"] {
 .empty-desc {
   font-size: 0.88rem;
 }
+
+/* --- Family Screen Styling --- */
+.family-hero-card {
+  background: var(--secondary-bg-color);
+  border-radius: 20px;
+  padding: 24px 18px;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  margin-top: 10px;
+  margin-bottom: 24px;
+}
+.family-hero-icon { font-size: 3.2rem; margin-bottom: 12px; }
+.family-hero-title { font-size: 1.4rem; font-weight: 700; margin-bottom: 8px; }
+.family-hero-desc { font-size: 0.92rem; color: var(--hint-color); line-height: 1.45; margin-bottom: 20px; }
+
+.invite-box {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px dashed rgba(56, 189, 248, 0.4);
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 20px;
+  position: relative;
+}
+.invite-label { font-size: 0.82rem; color: var(--link-color); font-weight: 600; display: block; margin-bottom: 8px; }
+.invite-input {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-color);
+  padding: 10px 12px;
+  border-radius: 10px;
+  width: 100%;
+  font-size: 0.85rem;
+  box-sizing: border-box;
+  text-align: center;
+}
+.invite-actions { display: flex; gap: 8px; margin-top: 12px; justify-content: center; }
+.share-btn-sm {
+  background: #0284c7;
+  color: #fff;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.copy-toast {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: #4ade80;
+  font-weight: 600;
+}
+
+.family-rules-card { display: flex; flex-direction: column; gap: 12px; text-align: left; }
+.rule-item { display: flex; align-items: flex-start; gap: 10px; }
+.rule-icon { font-size: 1.2rem; }
+.rule-text { font-size: 0.84rem; color: var(--hint-color); line-height: 1.35; }
+.rule-text b { color: var(--text-color); }
+
+/* Members Grid */
+.family-members-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.member-card {
+  background: var(--secondary-bg-color);
+  border-radius: 14px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.member-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.member-name { font-size: 0.9rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px; }
+.member-badge {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+.member-card.self .member-badge { background: rgba(56, 189, 248, 0.2); color: #38bdf8; }
+.member-card.partner .member-badge { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
+.member-balance { font-size: 1.15rem; font-weight: 800; margin-bottom: 4px; }
+.member-stats { font-size: 0.78rem; color: var(--hint-color); }
+
+/* Author badges in tx feed */
+.tx-top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.author-tag {
+  font-size: 0.7rem;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.author-self { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+.author-partner { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+
+.family-footer-actions { margin-top: 30px; margin-bottom: 20px; text-align: center; }
+.leave-btn {
+  background: none;
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  color: #fb7185;
+  padding: 8px 18px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.leave-btn:hover {
+  background: rgba(244, 63, 94, 0.1);
+}

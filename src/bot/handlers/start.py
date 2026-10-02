@@ -1,13 +1,14 @@
 from aiogram import Router, F
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.types import Message, CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from src.models.user import User
 from src.core.config import settings
-from src.bot.keyboards.inline import currency_keyboard, welcome_back_keyboard, miniapp_keyboard, deposits_keyboard
+from src.bot.keyboards.inline import currency_keyboard, welcome_back_keyboard, miniapp_keyboard, deposits_keyboard, family_keyboard
 from src.bot.messages import BotMessages
 from src.services.transaction_service import TransactionService
+from src.services.family_service import FamilyService
 
 router = Router()
 
@@ -39,28 +40,61 @@ async def cmd_deposits(message: Message):
     )
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, session: AsyncSession):
+async def cmd_start(message: Message, session: AsyncSession, command: CommandObject):
     user_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
     
     user = await session.scalar(select(User).where(User.id == user_id))
+    is_new_user = False
     
     if not user:
         user = User(id=user_id, username=username, first_name=first_name, currency="KZT")
         session.add(user)
         await session.commit()
+        is_new_user = True
+    elif user.username != username or user.first_name != first_name:
+        user.username = username
+        user.first_name = first_name
+        await session.commit()
+
+    # Check for Family Invite Deep Link: /start fam_<invite_code>
+    if command and command.args and command.args.startswith("fam_"):
+        invite_code = command.args[4:]
+        fam_service = FamilyService(session)
+        group, partner_id, feedback_msg = await fam_service.join_by_invite(user, invite_code)
+
+        if group and partner_id:
+            try:
+                author_title = user.first_name or (f"@{user.username}" if user.username else "Партнёр")
+                await message.bot.send_message(
+                    partner_id,
+                    f"🎉 <b>{author_title}</b> присоединился(лась) к вашей семейной группе <b>«{group.name}»</b>!\n\n"
+                    f"Теперь ваши расходы и доходы объединены во вкладке «Семья» в MiniApp."
+                )
+            except Exception:
+                pass
+
+        family_url = f"{get_miniapp_url()}?page=family"
+        if user.initial_balance is None:
+            await message.answer(
+                f"👨‍👩‍👧‍👦 <b>Семейный бюджет</b>\n\n{feedback_msg}\n\n{BotMessages.ask_initial_balance()}",
+                reply_markup=family_keyboard(family_url)
+            )
+        else:
+            await message.answer(
+                f"👨‍👩‍👧‍👦 <b>Семейный бюджет</b>\n\n{feedback_msg}\n\n"
+                f"Нажмите кнопку ниже, чтобы открыть общий семейный бюджет:",
+                reply_markup=family_keyboard(family_url)
+            )
+        return
+
+    if is_new_user:
         await message.answer(
             BotMessages.welcome_new(),
             reply_markup=currency_keyboard()
         )
         return
-    
-    # Update first_name/username if changed
-    if user.username != username or user.first_name != first_name:
-        user.username = username
-        user.first_name = first_name
-        await session.commit()
 
     if user.initial_balance is None:
         await message.answer(
