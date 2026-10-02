@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from src.core.config import settings
@@ -13,12 +14,18 @@ async def lifespan(app: FastAPI):
         category_service = CategoryService(session)
         await category_service.seed_default_categories()
 
-    # Set webhook on startup if token is configured
+    polling_task = None
     if settings.bot_token and settings.domain and settings.domain != "localhost":
         await bot.set_webhook(url=settings.webhook_url, secret_token=settings.webhook_secret)
+    elif settings.bot_token:
+        await bot.delete_webhook(drop_pending_updates=True)
+        polling_task = asyncio.create_task(dp.start_polling(bot))
+
     yield
-    # Cleanup on shutdown
-    if settings.bot_token and settings.domain and settings.domain != "localhost":
+
+    if polling_task:
+        polling_task.cancel()
+    elif settings.bot_token and settings.domain and settings.domain != "localhost":
         await bot.delete_webhook()
     await engine.dispose()
 
