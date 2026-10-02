@@ -96,6 +96,8 @@ class TransactionService:
             cat_names = list({c.name for c in available_cats})
 
             ai_result = await self.ai_service.classify_text(text, cat_names)
+            if isinstance(ai_result, list):
+                ai_result = ai_result[0] if ai_result else {}
             ai_cat_name = ai_result.get("category") or "Обязательные расходы"
             cat_type = CategoryType(ai_result.get("type", "expense"))
 
@@ -153,6 +155,10 @@ class TransactionService:
         cat_names = list({c.name for c in available_cats})
 
         ai_result = await self.ai_service.parse_voice(audio_bytes, mime_type, cat_names)
+        if isinstance(ai_result, list):
+            ai_result = ai_result[0] if ai_result else {}
+
+        raw_text = ai_result.get("raw_text")
         ai_cat_name = ai_result.get("category") or "Обязательные расходы"
         cat_type = CategoryType(ai_result.get("type", "expense"))
         category = await self._resolve_category(ai_cat_name, cat_type, user_id)
@@ -199,6 +205,8 @@ class TransactionService:
         cat_names = list({c.name for c in available_cats})
 
         ai_result = await self.ai_service.parse_receipt_photo(image_bytes, mime_type, cat_names)
+        if isinstance(ai_result, list):
+            ai_result = ai_result[0] if ai_result else {}
         ai_cat_name = ai_result.get("category") or "Продукты"
         cat_type = CategoryType(ai_result.get("type", "expense"))
         category = await self._resolve_category(ai_cat_name, cat_type, user_id)

@@ -53,3 +53,27 @@ class BotMessages:
     @staticmethod
     def service_unavailable() -> str:
         return "⚠️ Временная ошибка распознавания. Пожалуйста, попробуй ещё раз или отправь текстом."
+
+    @staticmethod
+    def welcome_new() -> str:
+        return (
+            "👋 <b>Добро пожаловать в Smart Bujet!</b>\n\n"
+            "Я помогу вам легко вести учёт расходов и доходов.\n"
+            "Пожалуйста, выберите вашу основную валюту:"
+        )
+
+    @staticmethod
+    def welcome_back(first_name: str | None, currency: str) -> str:
+        name_greeting = f", {first_name}" if first_name else ""
+        return (
+            f"👋 <b>С возвращением{name_greeting}!</b>\n\n"
+            f"💰 Ваша текущая валюта: <b>{currency}</b>\n\n"
+            f"💡 <b>Как записать трату:</b>\n"
+            f"• Отправьте текст: <i>«Кофе 250»</i>\n"
+            f"• Запишите голосовое сообщение\n"
+            f"• Отправьте фото чека"
+        )
+
+    @staticmethod
+    def currency_updated(currency: str) -> str:
+        return f"✅ Валюта успешно установлена: <b>{currency}</b>"

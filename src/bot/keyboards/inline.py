@@ -8,6 +8,13 @@ def currency_keyboard() -> InlineKeyboardMarkup:
     keyboard = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+def welcome_back_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💱 Изменить валюту", callback_data="change_currency")]
+        ]
+    )
+
 def confirm_transaction_keyboard(tx_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

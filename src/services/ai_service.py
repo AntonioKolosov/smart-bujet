@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from decimal import Decimal
 from typing import Optional, Dict, Any, List
 from google import genai
@@ -7,6 +8,30 @@ from google.genai import types
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_ai_json(raw_text: str) -> List[Dict[str, Any]]:
+    """
+    Defensively parse JSON from Gemini and normalize to List[Dict].
+    Handles raw dicts, lists, wrapped keys ('items', 'transactions'), and markdown fences.
+    """
+    clean_text = raw_text.strip()
+    if clean_text.startswith("```"):
+        clean_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", clean_text, flags=re.MULTILINE).strip()
+
+    try:
+        data = json.loads(clean_text)
+    except Exception:
+        return []
+
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    elif isinstance(data, dict):
+        for key in ("transactions", "items", "data", "results"):
+            if isinstance(data.get(key), list):
+                return [item for item in data[key] if isinstance(item, dict)]
+        return [data]
+    return []
 
 
 class AIService:
@@ -24,13 +49,14 @@ class AIService:
         Classify text transaction into category, amount, item_name, type.
         Returns: {"category": str, "amount": float, "item_name": str, "type": "expense"|"income"}
         """
+        default_fallback = {
+            "category": categories[0] if categories else "Обязательные расходы",
+            "type": "expense",
+            "amount": None,
+            "item_name": text
+        }
         if not self.client:
-            return {
-                "category": categories[0] if categories else "Обязательные расходы",
-                "type": "expense",
-                "amount": None,
-                "item_name": text
-            }
+            return default_fallback
 
         prompt = (
             f"Ты финансовый ассистент приложения учёта бюджета Smart Bujet.\n"
@@ -49,15 +75,16 @@ class AIService:
                     temperature=0.1
                 )
             )
-            return json.loads(response.text)
+            items = normalize_ai_json(response.text)
+            if not items:
+                return default_fallback
+            primary = items[0]
+            if len(items) > 1:
+                primary["_additional_items"] = items[1:]
+            return primary
         except Exception as exc:
             logger.error("AI classify_text failed: %s", exc)
-            return {
-                "category": categories[0] if categories else "Обязательные расходы",
-                "type": "expense",
-                "amount": None,
-                "item_name": text
-            }
+            return default_fallback
 
     async def parse_voice(
         self,
@@ -69,8 +96,9 @@ class AIService:
         In-memory voice message processing via types.Part.from_bytes.
         Never saves .ogg files to disk.
         """
+        default_fallback = {"category": "Обязательные расходы", "type": "expense", "amount": None, "item_name": "Голосовая запись"}
         if not self.client:
-            return {"category": "Обязательные расходы", "type": "expense", "amount": None, "item_name": "Голосовая запись"}
+            return default_fallback
 
         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
         prompt = (
@@ -89,10 +117,16 @@ class AIService:
                     temperature=0.1
                 )
             )
-            return json.loads(response.text)
+            items = normalize_ai_json(response.text)
+            if not items:
+                return default_fallback
+            primary = items[0]
+            if len(items) > 1:
+                primary["_additional_items"] = items[1:]
+            return primary
         except Exception as exc:
             logger.error("AI parse_voice failed: %s", exc)
-            return {"category": "Обязательные расходы", "type": "expense", "amount": None, "item_name": "Голосовая запись"}
+            return default_fallback
 
     async def parse_receipt_photo(
         self,
@@ -104,8 +138,9 @@ class AIService:
         In-memory receipt photo processing via types.Part.from_bytes.
         Never saves image files to disk.
         """
+        default_fallback = {"category": "Продукты", "type": "expense", "amount": None, "item_name": "Чек"}
         if not self.client:
-            return {"category": "Продукты", "type": "expense", "amount": None, "item_name": "Чек"}
+            return default_fallback
 
         image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
         prompt = (
@@ -125,8 +160,14 @@ class AIService:
                     temperature=0.1
                 )
             )
-            return json.loads(response.text)
+            items = normalize_ai_json(response.text)
+            if not items:
+                return default_fallback
+            primary = items[0]
+            if len(items) > 1:
+                primary["_additional_items"] = items[1:]
+            return primary
         except Exception as exc:
             logger.error("AI parse_receipt_photo failed: %s", exc)
-            return {"category": "Продукты", "type": "expense", "amount": None, "item_name": "Чек"}
+            return default_fallback
 
