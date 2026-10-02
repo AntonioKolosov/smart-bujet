@@ -3,58 +3,170 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Smart Bujet — Журнал транзакций</title>
+  <title>Smart Bujet — Журнал и Депозиты</title>
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
   <div id="app" class="container">
-    <!-- Header Card -->
-    <header class="app-header">
+    <!-- Top Bar -->
+    <header class="app-topbar">
       <div class="header-user">
         <div class="user-greeting" id="userGreeting">Smart Bujet</div>
         <div class="currency-badge" id="currencyBadge">₸ KZT</div>
       </div>
+    </header>
+
+    <!-- Tab 1: Operations (История транзакций) -->
+    <section id="tab-operations" class="tab-pane active">
       <div class="header-balance-card">
         <span class="balance-label">Текущий баланс</span>
         <span class="balance-value" id="currentBalance">0 ₸</span>
       </div>
+
       <div class="header-summary">
         <div class="summary-card">
-          <span class="summary-label">Расход за период</span>
+          <span class="summary-label" id="expensePeriodLabel">Расход за месяц</span>
           <span class="summary-value expense" id="totalExpense">0 ₸</span>
         </div>
         <div class="summary-card">
-          <span class="summary-label">Доход за период</span>
+          <span class="summary-label" id="incomePeriodLabel">Доход за месяц</span>
           <span class="summary-value income" id="totalIncome">0 ₸</span>
         </div>
       </div>
-    </header>
 
-    <!-- Toolbar -->
-    <div class="toolbar">
-      <h2 class="section-title">История транзакций</h2>
-      <button id="refreshBtn" class="refresh-btn" title="Обновить">↻</button>
-    </div>
+      <div class="toolbar">
+        <h2 class="section-title">История транзакций</h2>
+        <button id="refreshBtn" class="refresh-btn" title="Обновить">↻</button>
+      </div>
 
-    <!-- Status Messages -->
-    <div id="loader" class="loader-container">
-      <div class="spinner"></div>
-      <p>Загрузка операций...</p>
-    </div>
+      <div id="loader" class="loader-container">
+        <div class="spinner"></div>
+        <p>Загрузка операций...</p>
+      </div>
 
-    <div id="errorMessage" class="error-banner hidden"></div>
+      <div id="errorMessage" class="error-banner hidden"></div>
 
-    <div id="emptyMessage" class="empty-banner hidden">
-      <div class="empty-icon">🧾</div>
-      <p class="empty-title">Транзакций пока нет</p>
-      <span class="empty-desc">Отправьте боту текст, голосовое сообщение или фото чека</span>
-    </div>
+      <div id="emptyMessage" class="empty-banner hidden">
+        <div class="empty-icon">🧾</div>
+        <p class="empty-title">Транзакций пока нет</p>
+        <span class="empty-desc">Отправьте боту текст, голосовое сообщение или фото чека</span>
+      </div>
 
-    <!-- Transaction List Container -->
-    <main id="txList" class="tx-list"></main>
+      <main id="txList" class="tx-list"></main>
+    </section>
+
+    <!-- Tab 2: Assets & Deposits (Депозиты и активы) -->
+    <section id="tab-assets" class="tab-pane">
+      <div class="header-balance-card asset-networth-card">
+        <span class="balance-label">Общий капитал (Net Worth)</span>
+        <span class="balance-value net-worth-value" id="totalNetWorth">0 ₸</span>
+        <div class="networth-sub">
+          <span>Свободно: <b id="liquidWorth">0 ₸</b></span>
+          <span>•</span>
+          <span>В активах: <b id="lockedWorth">0 ₸</b></span>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <h2 class="section-title">Депозиты и валютные счета</h2>
+        <button id="addAssetBtn" class="primary-btn-sm">+ Добавить</button>
+      </div>
+
+      <div id="assetsLoader" class="loader-container hidden">
+        <div class="spinner"></div>
+        <p>Загрузка счетов...</p>
+      </div>
+
+      <div id="assetsEmpty" class="empty-banner hidden">
+        <div class="empty-icon">🏦</div>
+        <p class="empty-title">Счетов и депозитов пока нет</p>
+        <span class="empty-desc">Нажмите «+ Добавить», чтобы создать вклад, копилку или валютный счёт</span>
+      </div>
+
+      <main id="assetsList" class="assets-list"></main>
+    </section>
   </div>
+
+  <!-- Modal: Add Asset -->
+  <div id="addAssetModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Новый счёт или вклад</h3>
+        <button id="closeAddModalBtn" class="close-btn">&times;</button>
+      </div>
+      <form id="addAssetForm" class="modal-form">
+        <label class="form-label">
+          Название
+          <input type="text" id="assetNameInput" class="form-input" placeholder="Например: Kaspi Депозит или Сейф USD" required />
+        </label>
+        <div class="form-row">
+          <label class="form-label">
+            Тип
+            <select id="assetTypeSelect" class="form-select">
+              <option value="deposit">Депозит / Вклад</option>
+              <option value="currency">Наличная валюта</option>
+              <option value="savings">Копилка</option>
+              <option value="investment">Инвестиции</option>
+            </select>
+          </label>
+          <label class="form-label">
+            Валюта
+            <select id="assetCurrencySelect" class="form-select">
+              <option value="KZT">₸ KZT</option>
+              <option value="USD">$ USD</option>
+              <option value="EUR">€ EUR</option>
+              <option value="RUB">₽ RUB</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="form-label">
+            Текущий остаток
+            <input type="number" step="0.01" id="assetBalanceInput" class="form-input" placeholder="0" />
+          </label>
+          <label class="form-label">
+            Ставка (% год.)
+            <input type="number" step="0.1" id="assetRateInput" class="form-input" placeholder="например 14.5" />
+          </label>
+        </div>
+        <button type="submit" class="modal-submit-btn">Создать счёт</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Action (Deposit / Withdraw) -->
+  <div id="actionModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title" id="actionModalTitle">Пополнить депозит</h3>
+        <button id="closeActionModalBtn" class="close-btn">&times;</button>
+      </div>
+      <form id="actionForm" class="modal-form">
+        <input type="hidden" id="actionAssetId" />
+        <input type="hidden" id="actionType" value="deposit" />
+        <p class="action-desc" id="actionModalDesc">Перевод средств с текущего баланса</p>
+        <label class="form-label">
+          Сумма
+          <input type="number" step="0.01" id="actionAmountInput" class="form-input" placeholder="0" required autofocus />
+        </label>
+        <button type="submit" class="modal-submit-btn" id="actionSubmitBtn">Подтвердить</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Persistent Bottom Navigation Bar -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" id="navOpsBtn" data-tab="tab-operations">
+      <span class="nav-icon">💳</span>
+      <span class="nav-text">Операции</span>
+    </button>
+    <button class="nav-item" id="navAssetsBtn" data-tab="tab-assets">
+      <span class="nav-icon">🏦</span>
+      <span class="nav-text">Депозиты</span>
+    </button>
+  </nav>
 
   <script src="/static/app.js"></script>
 </body>

@@ -32,8 +32,8 @@ class ParserService:
         if re.search(r"(?:скидк|дисконт|акци|-%|off)", text, re.IGNORECASE):
             return None
 
-        # If text mentions income or transfer keywords, bypass regex to let AI classify category and type
-        if re.search(r"(?:зарплат|доход|аванс|преми|подар|пополн|перевод|перевел|перевела|скинул|скинула|отправил)", text, re.IGNORECASE):
+        # If text mentions income, transfer, deposit or currency keywords, bypass regex to let AI classify
+        if re.search(r"(?:зарплат|доход|аванс|преми|подар|пополн|перевод|перевел|перевела|скинул|скинула|отправил|депозит|вклад|копилк|валют|доллар|\$|евро|€|брокер)", text, re.IGNORECASE):
             return None
 
         # If multiple numbers exist, bypass single-item regex to let AI process multi-item batch

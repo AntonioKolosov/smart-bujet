@@ -16,9 +16,13 @@ DEFAULT_CATEGORIES = [
     ("Подписки", CategoryType.expense),
     ("Зарплата", CategoryType.income),
     ("Подарок", CategoryType.expense),
-    ("Подарок", CategoryType.income),
     ("Денежный перевод", CategoryType.expense),
     ("Денежный перевод", CategoryType.income),
+    ("Депозит и вклады", CategoryType.transfer_out),
+    ("Покупка валюты", CategoryType.transfer_out),
+    ("Снятие с депозита", CategoryType.transfer_in),
+    ("Продажа валюты", CategoryType.transfer_in),
+    ("Проценты по вкладу", CategoryType.income),
 ]
 
 

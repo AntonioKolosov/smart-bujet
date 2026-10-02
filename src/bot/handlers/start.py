@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from src.models.user import User
 from src.core.config import settings
-from src.bot.keyboards.inline import currency_keyboard, welcome_back_keyboard, miniapp_keyboard
+from src.bot.keyboards.inline import currency_keyboard, welcome_back_keyboard, miniapp_keyboard, deposits_keyboard
 from src.bot.messages import BotMessages
 from src.services.transaction_service import TransactionService
 
@@ -26,6 +26,16 @@ async def cmd_miniapp(message: Message):
     await message.answer(
         "📱 Нажмите кнопку ниже, чтобы открыть журнал транзакций во весь экран:",
         reply_markup=miniapp_keyboard(url)
+    )
+
+@router.message(Command("deposits"))
+@router.message(Command("assets"))
+async def cmd_deposits(message: Message):
+    url = f"{get_miniapp_url()}?page=deposits"
+    await message.answer(
+        "🏦 <b>Депозиты, сбережения и валютные счета</b>\n\n"
+        "Управляйте вашими банковскими вкладами, копилками и валютными счетами во весь экран:",
+        reply_markup=deposits_keyboard(url)
     )
 
 @router.message(CommandStart())

@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, Tuple, List
 from sqlalchemy import select, func
@@ -7,9 +8,11 @@ from src.models.user import User
 from src.models.category import Category, CategoryType
 from src.models.transaction import Transaction, TransactionSource
 from src.models.alias import UserItemAlias
+from src.models.asset import AssetAccount, AssetType
 from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError
 from src.services.parser_service import ParserService
 from src.services.category_service import CategoryService
+from src.services.asset_service import AssetService
 from src.services.ai_service import AIService
 from src.services.discount_service import DiscountDistributor
 
@@ -19,6 +22,7 @@ class TransactionService:
         self.session = session
         self.ai_service = ai_service or AIService()
         self.category_service = CategoryService(session)
+        self.asset_service = AssetService(session)
 
     async def _get_alias_category(
         self,
@@ -134,6 +138,25 @@ class TransactionService:
             orig_amt = item.get("original_amount")
             disc_amt = item.get("discount_amount")
 
+            asset_account_id = None
+            asset_amt = item.get("asset_amount")
+            ex_rate = item.get("exchange_rate")
+
+            if cat_type in (CategoryType.transfer_out, CategoryType.transfer_in):
+                target_currency = item.get("target_currency", "KZT")
+                target_type = AssetType.currency if target_currency != "KZT" else AssetType.deposit
+                asset_acc = await self.asset_service.get_or_create_default_asset(
+                    user_id=user_id,
+                    asset_type=target_type,
+                    currency=target_currency
+                )
+                asset_account_id = asset_acc.id
+                delta = Decimal(str(asset_amt if asset_amt is not None else amt))
+                if cat_type == CategoryType.transfer_out:
+                    asset_acc.balance = float(Decimal(str(asset_acc.balance or 0)) + delta)
+                else:
+                    asset_acc.balance = float(Decimal(str(asset_acc.balance or 0)) - delta)
+
             tx = Transaction(
                 user_id=user_id,
                 family_group_id=family_group_id,
@@ -142,6 +165,9 @@ class TransactionService:
                 original_amount=float(orig_amt) if orig_amt is not None else None,
                 discount_amount=float(disc_amt) if disc_amt is not None else None,
                 type=cat_type,
+                asset_account_id=asset_account_id,
+                asset_amount=float(asset_amt) if asset_amt is not None else None,
+                exchange_rate=float(ex_rate) if ex_rate is not None else None,
                 item_name=normalized_name,
                 raw_text=text,
                 source=TransactionSource.text,
@@ -196,7 +222,7 @@ class TransactionService:
 
             last_raw_text = item.get("raw_text")
             cat_type = CategoryType(item.get("type", "expense"))
-            fallback_name = "Доход" if cat_type == CategoryType.income else "Расход"
+            fallback_name = "Доход" if cat_type == CategoryType.income else ("Перевод" if "transfer" in cat_type.value else "Расход")
             raw_name = item.get("item_name") or last_raw_text or fallback_name
             normalized_name = ParserService.normalize_item_name(raw_name)
 
@@ -210,6 +236,25 @@ class TransactionService:
             orig_amt = item.get("original_amount")
             disc_amt = item.get("discount_amount")
 
+            asset_account_id = None
+            asset_amt = item.get("asset_amount")
+            ex_rate = item.get("exchange_rate")
+
+            if cat_type in (CategoryType.transfer_out, CategoryType.transfer_in):
+                target_currency = item.get("target_currency", "KZT")
+                target_type = AssetType.currency if target_currency != "KZT" else AssetType.deposit
+                asset_acc = await self.asset_service.get_or_create_default_asset(
+                    user_id=user_id,
+                    asset_type=target_type,
+                    currency=target_currency
+                )
+                asset_account_id = asset_acc.id
+                delta = Decimal(str(asset_amt if asset_amt is not None else amt))
+                if cat_type == CategoryType.transfer_out:
+                    asset_acc.balance = float(Decimal(str(asset_acc.balance or 0)) + delta)
+                else:
+                    asset_acc.balance = float(Decimal(str(asset_acc.balance or 0)) - delta)
+
             tx = Transaction(
                 user_id=user_id,
                 family_group_id=family_group_id,
@@ -218,6 +263,9 @@ class TransactionService:
                 original_amount=float(orig_amt) if orig_amt is not None else None,
                 discount_amount=float(disc_amt) if disc_amt is not None else None,
                 type=cat_type,
+                asset_account_id=asset_account_id,
+                asset_amount=float(asset_amt) if asset_amt is not None else None,
+                exchange_rate=float(ex_rate) if ex_rate is not None else None,
                 item_name=normalized_name,
                 raw_text=last_raw_text,
                 source=TransactionSource.voice,
@@ -306,9 +354,22 @@ class TransactionService:
         return transactions
 
     async def get_user_balance(self, user_id: int) -> dict:
-        """Calculate live account balance: initial_balance + sum(income) - sum(expenses)."""
+        """Calculate live account balance and monthly metrics."""
         user = await self.session.get(User, user_id)
         initial = Decimal(str(user.initial_balance or 0)) if user and user.initial_balance is not None else Decimal(0)
+
+        now = datetime.now(timezone.utc)
+        start_month = datetime(now.year, now.month, 1, 0, 0, 0, tzinfo=timezone.utc)
+        if now.month == 12:
+            next_month = datetime(now.year + 1, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        else:
+            next_month = datetime(now.year, now.month + 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+        MONTH_NAMES_RU = [
+            "", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+            "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
+        ]
+        month_label = f"{MONTH_NAMES_RU[now.month]} {now.year}"
 
         income_sum = await self.session.scalar(
             select(func.coalesce(func.sum(Transaction.amount), 0))
@@ -320,12 +381,51 @@ class TransactionService:
             .where(Transaction.user_id == user_id, Transaction.type == CategoryType.expense)
         ) or 0
 
-        current_balance = initial + Decimal(str(income_sum)) - Decimal(str(expense_sum))
+        transfer_out_sum = await self.session.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .where(Transaction.user_id == user_id, Transaction.type == CategoryType.transfer_out)
+        ) or 0
+
+        transfer_in_sum = await self.session.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .where(Transaction.user_id == user_id, Transaction.type == CategoryType.transfer_in)
+        ) or 0
+
+        month_expense = await self.session.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .where(
+                Transaction.user_id == user_id,
+                Transaction.type == CategoryType.expense,
+                Transaction.transaction_date >= start_month,
+                Transaction.transaction_date < next_month,
+            )
+        ) or 0
+
+        month_income = await self.session.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .where(
+                Transaction.user_id == user_id,
+                Transaction.type == CategoryType.income,
+                Transaction.transaction_date >= start_month,
+                Transaction.transaction_date < next_month,
+            )
+        ) or 0
+
+        current_balance = (
+            initial
+            + Decimal(str(income_sum))
+            - Decimal(str(expense_sum))
+            - Decimal(str(transfer_out_sum))
+            + Decimal(str(transfer_in_sum))
+        )
         return {
             "initial_balance": float(initial),
             "total_income": float(income_sum),
             "total_expense": float(expense_sum),
+            "month_income": float(month_income),
+            "month_expense": float(month_expense),
+            "month_period_name": month_label,
             "current_balance": float(current_balance),
-            "currency": user.currency if user else "KZT"
+            "currency": user.currency if user else "KZT",
         }
 

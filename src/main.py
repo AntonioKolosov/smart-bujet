@@ -39,6 +39,7 @@ async def lifespan(app: FastAPI):
             )
             await bot.set_my_commands([
                 BotCommand(command="miniapp", description="Открыть журнал транзакций"),
+                BotCommand(command="deposits", description="Депозиты и сбережения"),
                 BotCommand(command="start", description="Перезапустить бота"),
             ])
             logger.info("Chat menu button and bot commands successfully registered: %s", miniapp_url)

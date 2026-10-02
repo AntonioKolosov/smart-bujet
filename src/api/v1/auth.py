@@ -53,6 +53,9 @@ async def get_me(
         "initial_balance": bal_data["initial_balance"],
         "total_income": bal_data["total_income"],
         "total_expense": bal_data["total_expense"],
+        "month_income": bal_data.get("month_income", 0.0),
+        "month_expense": bal_data.get("month_expense", 0.0),
+        "month_period_name": bal_data.get("month_period_name", "Текущий месяц"),
         "current_balance": bal_data["current_balance"],
         "family_group_id": str(current_user.family_group_id) if current_user.family_group_id else None
     }

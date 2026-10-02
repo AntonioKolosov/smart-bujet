@@ -10,6 +10,8 @@ from src.models.base import Base, TimestampMixin
 class CategoryType(str, Enum):
     income = "income"
     expense = "expense"
+    transfer_out = "transfer_out"  # Перевод в депозит / покупка валюты
+    transfer_in = "transfer_in"    # Вывод с депозита / продажа валюты
 
 
 class Category(Base, TimestampMixin):

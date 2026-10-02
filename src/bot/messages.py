@@ -43,11 +43,24 @@ class BotMessages:
         # Case 1: Single item formatting
         if len(tx_list) == 1:
             tx = tx_list[0]
-            icon = "💸" if tx.type == CategoryType.expense else "💰"
-            type_label = "Расход" if tx.type == CategoryType.expense else "Доход"
+            if tx.type == CategoryType.transfer_out:
+                icon = "🏦"
+                type_label = "Перевод в депозит/актив"
+            elif tx.type == CategoryType.transfer_in:
+                icon = "🏦"
+                type_label = "Вывод из актива"
+            elif tx.type == CategoryType.income:
+                icon = "💰"
+                type_label = "Доход"
+            else:
+                icon = "💸"
+                type_label = "Расход"
+
             cat_name = tx.category.name if tx.category else "Общее"
 
             amount_str = f"<b>{format_amount(tx.amount, currency)}</b>"
+            if tx.asset_amount:
+                amount_str += f" (<b>{tx.asset_amount:g} у.е.</b>)"
             discount_line = ""
             if tx.discount_amount and tx.discount_amount > 0 and tx.original_amount:
                 amount_str += f" <s>{format_amount(tx.original_amount, currency)}</s>"
