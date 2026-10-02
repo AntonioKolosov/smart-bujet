@@ -67,86 +67,77 @@ class TransactionService:
             cat = categories[0] if categories else None
         return cat
 
-    async def process_text(self, user_id: int, text: str) -> Transaction:
+    async def process_text(self, user_id: int, text: str) -> List[Transaction]:
         """
-        Two-level parsing:
-        1. Fast Regex parsing
-        2. Local alias lookup (10-15 ms)
-        3. Gemini AI fallback if alias not found
+        Multi-item capable text transaction processing:
+        1. Fast Regex parsing (single item)
+        2. Gemini AI fallback (multi-item batch or uncached single item)
         """
         user = await self.session.get(User, user_id)
         family_group_id = user.family_group_id if user else None
 
-        # Level 1: Regex parse amount and item name
         parsed = ParserService.parse_text(text)
-        amount = parsed[0] if parsed else None
-        item_name = parsed[1] if parsed else text.strip()
+        raw_items: List[dict] = []
 
-        # Level 2: Local user alias cache lookup
-        category = None
-        cat_type = CategoryType.expense
-        if item_name:
-            category = await self._get_alias_category(user_id, item_name)
-            if category:
-                cat_type = category.type
-
-        # Level 3: Fallback to Gemini 2.5 Flash if category not found in cache or amount missing
-        if not category or amount is None:
+        if parsed:
+            amount, item_name = parsed
+            raw_items = [{"amount": amount, "item_name": item_name, "type": "expense", "category": None}]
+        else:
             available_cats = await self.category_service.get_categories(user_id)
             cat_names = list({c.name for c in available_cats})
+            raw_items = await self.ai_service.classify_text(text, cat_names)
 
-            ai_result = await self.ai_service.classify_text(text, cat_names)
-            if isinstance(ai_result, list):
-                ai_result = ai_result[0] if ai_result else {}
-            ai_cat_name = ai_result.get("category") or "Обязательные расходы"
-            cat_type = CategoryType(ai_result.get("type", "expense"))
+        if not raw_items:
+            raise TransactionParseError("Could not parse transaction from message")
 
+        transactions: List[Transaction] = []
+        for item in raw_items:
+            try:
+                amt = Decimal(str(item.get("amount", 0) or 0))
+            except Exception:
+                amt = Decimal("0")
+
+            if amt <= Decimal("0"):
+                continue
+
+            raw_name = item.get("item_name") or text
+            normalized_name = ParserService.normalize_item_name(raw_name)
+            cat_type = CategoryType(item.get("type", "expense"))
+
+            category = await self._get_alias_category(user_id, normalized_name)
+            if not category and item.get("category"):
+                category = await self._resolve_category(item["category"], cat_type, user_id)
             if not category:
-                category = await self._resolve_category(ai_cat_name, cat_type, user_id)
+                cats = await self.category_service.get_categories(user_id, cat_type)
+                category = cats[0]
 
-            if amount is None and ai_result.get("amount"):
-                try:
-                    amount = Decimal(str(ai_result["amount"]))
-                except Exception:
-                    amount = Decimal("0")
+            tx = Transaction(
+                user_id=user_id,
+                family_group_id=family_group_id,
+                category_id=category.id,
+                amount=float(amt),
+                type=cat_type,
+                item_name=normalized_name,
+                raw_text=text,
+                source=TransactionSource.text,
+            )
+            tx.category = category
+            self.session.add(tx)
+            await self._save_alias(user_id, normalized_name, category.id)
+            transactions.append(tx)
 
-            if ai_result.get("item_name") and (not item_name or item_name == text.strip()):
-                item_name = ai_result["item_name"]
-
-        if not amount or amount <= Decimal("0"):
+        if not transactions:
             raise InvalidTransactionAmountError("Amount must be greater than 0", raw_text=text)
 
-        if not category:
-            cats = await self.category_service.get_categories(user_id, cat_type)
-            category = cats[0]
-
-        # Save transaction
-        tx = Transaction(
-            user_id=user_id,
-            family_group_id=family_group_id,
-            category_id=category.id,
-            amount=float(amount),
-            type=cat_type,
-            item_name=item_name or text,
-            raw_text=text,
-            source=TransactionSource.text
-        )
-        self.session.add(tx)
-
-        # Update local alias cache for future instant lookup
-        if item_name:
-            await self._save_alias(user_id, item_name, category.id)
-
         await self.session.commit()
-        tx.category = category
-        return tx
+        return transactions
 
     async def process_voice(
         self,
         user_id: int,
         audio_bytes: bytes,
         mime_type: str = "audio/ogg"
-    ) -> Transaction:
+    ) -> List[Transaction]:
         """Process voice message in-memory without saving .ogg to disk."""
         user = await self.session.get(User, user_id)
         family_group_id = user.family_group_id if user else None
@@ -154,49 +145,61 @@ class TransactionService:
         available_cats = await self.category_service.get_categories(user_id)
         cat_names = list({c.name for c in available_cats})
 
-        ai_result = await self.ai_service.parse_voice(audio_bytes, mime_type, cat_names)
-        if isinstance(ai_result, list):
-            ai_result = ai_result[0] if ai_result else {}
+        raw_items = await self.ai_service.parse_voice(audio_bytes, mime_type, cat_names)
+        if not raw_items:
+            raise TransactionParseError("Could not parse voice transaction")
 
-        raw_text = ai_result.get("raw_text")
-        ai_cat_name = ai_result.get("category") or "Обязательные расходы"
-        cat_type = CategoryType(ai_result.get("type", "expense"))
-        category = await self._resolve_category(ai_cat_name, cat_type, user_id)
+        transactions: List[Transaction] = []
+        last_raw_text = None
 
-        try:
-            amount = Decimal(str(ai_result.get("amount", 0) or 0))
-        except Exception:
-            amount = Decimal("0")
+        for item in raw_items:
+            try:
+                amt = Decimal(str(item.get("amount", 0) or 0))
+            except Exception:
+                amt = Decimal("0")
 
-        if amount <= Decimal("0"):
-            raise InvalidTransactionAmountError("Amount must be greater than 0", raw_text=raw_text)
+            if amt <= Decimal("0"):
+                continue
 
-        item_name = ai_result.get("item_name") or raw_text or "Расход"
+            last_raw_text = item.get("raw_text")
+            raw_name = item.get("item_name") or last_raw_text or "Расход"
+            normalized_name = ParserService.normalize_item_name(raw_name)
+            cat_type = CategoryType(item.get("type", "expense"))
 
-        tx = Transaction(
-            user_id=user_id,
-            family_group_id=family_group_id,
-            category_id=category.id,
-            amount=float(amount),
-            type=cat_type,
-            item_name=item_name,
-            raw_text=raw_text,
-            source=TransactionSource.voice
-        )
-        self.session.add(tx)
-        if item_name:
-            await self._save_alias(user_id, item_name, category.id)
+            category = await self._get_alias_category(user_id, normalized_name)
+            if not category and item.get("category"):
+                category = await self._resolve_category(item["category"], cat_type, user_id)
+            if not category:
+                cats = await self.category_service.get_categories(user_id, cat_type)
+                category = cats[0]
+
+            tx = Transaction(
+                user_id=user_id,
+                family_group_id=family_group_id,
+                category_id=category.id,
+                amount=float(amt),
+                type=cat_type,
+                item_name=normalized_name,
+                raw_text=last_raw_text,
+                source=TransactionSource.voice,
+            )
+            tx.category = category
+            self.session.add(tx)
+            await self._save_alias(user_id, normalized_name, category.id)
+            transactions.append(tx)
+
+        if not transactions:
+            raise InvalidTransactionAmountError("Amount must be greater than 0", raw_text=last_raw_text)
 
         await self.session.commit()
-        tx.category = category
-        return tx
+        return transactions
 
     async def process_receipt_photo(
         self,
         user_id: int,
         image_bytes: bytes,
         mime_type: str = "image/jpeg"
-    ) -> Transaction:
+    ) -> List[Transaction]:
         """Process receipt photo in-memory without saving image to disk."""
         user = await self.session.get(User, user_id)
         family_group_id = user.family_group_id if user else None
@@ -204,38 +207,49 @@ class TransactionService:
         available_cats = await self.category_service.get_categories(user_id)
         cat_names = list({c.name for c in available_cats})
 
-        ai_result = await self.ai_service.parse_receipt_photo(image_bytes, mime_type, cat_names)
-        if isinstance(ai_result, list):
-            ai_result = ai_result[0] if ai_result else {}
-        ai_cat_name = ai_result.get("category") or "Продукты"
-        cat_type = CategoryType(ai_result.get("type", "expense"))
-        category = await self._resolve_category(ai_cat_name, cat_type, user_id)
+        raw_items = await self.ai_service.parse_receipt_photo(image_bytes, mime_type, cat_names)
+        if not raw_items:
+            raise TransactionParseError("Could not parse receipt photo")
 
-        try:
-            amount = Decimal(str(ai_result.get("amount", 0) or 0))
-        except Exception:
-            amount = Decimal("0")
+        transactions: List[Transaction] = []
+        for item in raw_items:
+            try:
+                amt = Decimal(str(item.get("amount", 0) or 0))
+            except Exception:
+                amt = Decimal("0")
 
-        if amount <= Decimal("0"):
+            if amt <= Decimal("0"):
+                continue
+
+            raw_name = item.get("item_name") or "Чек"
+            normalized_name = ParserService.normalize_item_name(raw_name)
+            cat_type = CategoryType(item.get("type", "expense"))
+
+            category = await self._get_alias_category(user_id, normalized_name)
+            if not category and item.get("category"):
+                category = await self._resolve_category(item["category"], cat_type, user_id)
+            if not category:
+                cats = await self.category_service.get_categories(user_id, cat_type)
+                category = cats[0]
+
+            tx = Transaction(
+                user_id=user_id,
+                family_group_id=family_group_id,
+                category_id=category.id,
+                amount=float(amt),
+                type=cat_type,
+                item_name=normalized_name,
+                raw_text="[Фото чека]",
+                source=TransactionSource.photo,
+            )
+            tx.category = category
+            self.session.add(tx)
+            await self._save_alias(user_id, normalized_name, category.id)
+            transactions.append(tx)
+
+        if not transactions:
             raise InvalidTransactionAmountError("Amount must be greater than 0")
 
-        item_name = ai_result.get("item_name") or "Чек"
-
-        tx = Transaction(
-            user_id=user_id,
-            family_group_id=family_group_id,
-            category_id=category.id,
-            amount=float(amount),
-            type=cat_type,
-            item_name=item_name,
-            raw_text="[Фото чека]",
-            source=TransactionSource.photo
-        )
-        self.session.add(tx)
-        if item_name:
-            await self._save_alias(user_id, item_name, category.id)
-
         await self.session.commit()
-        tx.category = category
-        return tx
+        return transactions
 

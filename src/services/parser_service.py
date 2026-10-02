@@ -7,15 +7,30 @@ CURRENCY_SUFFIXES = r"(?:руб(?:лей|ля|\.)?|р\b|тг\b|тенге|kzt\b|
 
 class ParserService:
     @staticmethod
+    def normalize_item_name(name: str) -> str:
+        """Strip extra spaces and capitalize the first letter without mangling internal casing."""
+        if not name:
+            return ""
+        cleaned = " ".join(name.strip().split())
+        if not cleaned:
+            return ""
+        return cleaned[0].upper() + cleaned[1:]
+
+    @staticmethod
     def parse_text(text: str) -> Optional[Tuple[Decimal, str]]:
         """
         Fast regex-based extraction of amount and item name from user message.
         Examples:
-          '1000 яблоки' -> (Decimal('1000'), 'яблоки')
-          'яблоки 1500.50' -> (Decimal('1500.50'), 'яблоки')
-          'кофе 500 руб' -> (Decimal('500'), 'кофе')
+          '1000 яблоки' -> (Decimal('1000'), 'Яблоки')
+          'яблоки 1500.50' -> (Decimal('1500.50'), 'Яблоки')
+          'кофе 500 руб' -> (Decimal('500'), 'Кофе')
         """
         if not text:
+            return None
+
+        # If multiple numbers exist, bypass single-item regex to let AI process multi-item batch
+        numbers = re.findall(r"\b\d+(?:[.,]\d+)?\b", text)
+        if len(numbers) > 1:
             return None
 
         # Pattern 1: Number at start -> "1000 яблоки" or "1000.50 руб яблоки"
@@ -30,7 +45,7 @@ class ParserService:
             try:
                 amt = Decimal(amt_str)
                 if amt > 0 and desc:
-                    return amt, desc
+                    return amt, ParserService.normalize_item_name(desc)
             except InvalidOperation:
                 pass
 
@@ -46,7 +61,7 @@ class ParserService:
             try:
                 amt = Decimal(amt_str)
                 if amt > 0 and desc:
-                    return amt, desc
+                    return amt, ParserService.normalize_item_name(desc)
             except InvalidOperation:
                 pass
 
@@ -60,7 +75,7 @@ class ParserService:
             try:
                 amt = Decimal(amt_str)
                 if amt > 0 and desc:
-                    return amt, desc
+                    return amt, ParserService.normalize_item_name(desc)
             except InvalidOperation:
                 pass
 

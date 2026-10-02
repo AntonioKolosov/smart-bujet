@@ -1,19 +1,74 @@
-"""
-Centralized Bot Message Templates.
-Adheres to single-source-of-truth for UX scripts and localization.
-"""
+from typing import List, Union
+from src.models.transaction import Transaction
+from src.models.category import CategoryType
+
+CURRENCY_SYMBOLS: dict[str, str] = {
+    "KZT": "₸",
+    "RUB": "₽",
+    "USD": "$",
+    "EUR": "€",
+}
+
+
+def get_currency_symbol(currency_code: str | None) -> str:
+    if not currency_code:
+        return "₽"
+    return CURRENCY_SYMBOLS.get(currency_code.upper(), currency_code)
+
+
+def format_amount(amount: float, currency_code: str | None) -> str:
+    symbol = get_currency_symbol(currency_code)
+    formatted = f"{amount:,.2f}".replace(",", " ")
+    return f"{formatted} {symbol}"
+
 
 class BotMessages:
     @staticmethod
-    def tx_success(item_name: str, amount: float, category_name: str, tx_type: str = "expense") -> str:
-        icon = "💸" if tx_type == "expense" else "💰"
-        type_label = "Расход" if tx_type == "expense" else "Доход"
-        return (
-            f"✅ <b>Записано!</b>\n\n"
-            f"{icon} <b>{type_label}</b>: <b>{amount:,.2f} ₽</b>\n"
-            f"📌 Позиция: <b>{item_name}</b>\n"
-            f"📁 Категория: <b>{category_name}</b>"
-        )
+    def tx_success(transactions: Union[List[Transaction], Transaction], currency: str = "RUB") -> str:
+        if not transactions:
+            return "✅ <b>Записано!</b>"
+
+        tx_list: List[Transaction] = [transactions] if isinstance(transactions, Transaction) else transactions
+        if not tx_list:
+            return "✅ <b>Записано!</b>"
+
+        # Case 1: Single item formatting
+        if len(tx_list) == 1:
+            tx = tx_list[0]
+            icon = "💸" if tx.type == CategoryType.expense else "💰"
+            type_label = "Расход" if tx.type == CategoryType.expense else "Доход"
+            cat_name = tx.category.name if tx.category else "Общее"
+            return (
+                f"✅ <b>Записано!</b>\n\n"
+                f"{icon} <b>{type_label}</b>: <b>{format_amount(tx.amount, currency)}</b>\n"
+                f"📌 Позиция: <b>{tx.item_name}</b>\n"
+                f"📁 Категория: <b>{cat_name}</b>"
+            )
+
+        # Case 2: Multi-item batch formatting
+        lines = [f"✅ <b>Записано ({len(tx_list)} поз.)!</b>\n"]
+        total_expense = 0.0
+        total_income = 0.0
+
+        for i, tx in enumerate(tx_list, start=1):
+            icon = "💸" if tx.type == CategoryType.expense else "💰"
+            cat_name = tx.category.name if tx.category else "Общее"
+            lines.append(f"{i}. {icon} <b>{tx.item_name}</b> — {format_amount(tx.amount, currency)} (<i>{cat_name}</i>)")
+            if tx.type == CategoryType.expense:
+                total_expense += float(tx.amount)
+            else:
+                total_income += float(tx.amount)
+
+        lines.append("")
+        if total_expense > 0 and total_income > 0:
+            lines.append(f"💸 Итого расходов: <b>{format_amount(total_expense, currency)}</b>")
+            lines.append(f"💰 Итого доходов: <b>{format_amount(total_income, currency)}</b>")
+        elif total_expense > 0:
+            lines.append(f"💰 <b>Итого: {format_amount(total_expense, currency)}</b>")
+        else:
+            lines.append(f"💰 <b>Итого: {format_amount(total_income, currency)}</b>")
+
+        return "\n".join(lines)
 
     @staticmethod
     def voice_clarification(recognized_text: str | None = None) -> str:
@@ -65,15 +120,17 @@ class BotMessages:
     @staticmethod
     def welcome_back(first_name: str | None, currency: str) -> str:
         name_greeting = f", {first_name}" if first_name else ""
+        symbol = get_currency_symbol(currency)
         return (
             f"👋 <b>С возвращением{name_greeting}!</b>\n\n"
-            f"💰 Ваша текущая валюта: <b>{currency}</b>\n\n"
+            f"💰 Ваша текущая валюта: <b>{currency} ({symbol})</b>\n\n"
             f"💡 <b>Как записать трату:</b>\n"
-            f"• Отправьте текст: <i>«Кофе 250»</i>\n"
+            f"• Отправьте текст: <i>«Кофе 250»</i> или <i>«Рыба 4032 и хлеб 300»</i>\n"
             f"• Запишите голосовое сообщение\n"
             f"• Отправьте фото чека"
         )
 
     @staticmethod
     def currency_updated(currency: str) -> str:
-        return f"✅ Валюта успешно установлена: <b>{currency}</b>"
+        symbol = get_currency_symbol(currency)
+        return f"✅ Валюта успешно установлена: <b>{currency} ({symbol})</b>"

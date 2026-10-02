@@ -44,26 +44,28 @@ class AIService:
         self,
         text: str,
         categories: List[str]
-    ) -> Dict[str, Any]:
+    ) -> List[Dict[str, Any]]:
         """
-        Classify text transaction into category, amount, item_name, type.
-        Returns: {"category": str, "amount": float, "item_name": str, "type": "expense"|"income"}
+        Classify text transaction into a list of items (batch processing).
+        Returns: [{"category": str, "amount": float, "item_name": str, "type": "expense"|"income"}, ...]
         """
-        default_fallback = {
-            "category": categories[0] if categories else "Обязательные расходы",
-            "type": "expense",
-            "amount": None,
-            "item_name": text
-        }
         if not self.client:
-            return default_fallback
+            return [{
+                "category": categories[0] if categories else "Обязательные расходы",
+                "type": "expense",
+                "amount": None,
+                "item_name": text
+            }]
 
         prompt = (
             f"Ты финансовый ассистент приложения учёта бюджета Smart Bujet.\n"
-            f"Определи параметры транзакции из пользовательского сообщения: \"{text}\".\n"
+            f"Определи ВСЕ позиции транзакций (расходы и доходы) из сообщения пользователя: \"{text}\".\n"
             f"Доступные категории: {', '.join(categories)}.\n"
-            f"Верни ответ строго в JSON формате со следующими полями:\n"
-            f'{{"category": "название из списка доступных", "type": "expense" или "income", "amount": число или null, "item_name": "краткое название позиции"}}\n'
+            f"Каждую позицию выдели отдельно. Название позиции (item_name) пиши с заглавной буквы.\n"
+            f"Верни ответ строго в виде JSON-массива объектов со следующими полями:\n"
+            f'[\n'
+            f'  {{"category": "название из списка доступных", "type": "expense" или "income", "amount": число, "item_name": "Название позиции"}}\n'
+            f']\n'
         )
 
         try:
@@ -75,37 +77,33 @@ class AIService:
                     temperature=0.1
                 )
             )
-            items = normalize_ai_json(response.text)
-            if not items:
-                return default_fallback
-            primary = items[0]
-            if len(items) > 1:
-                primary["_additional_items"] = items[1:]
-            return primary
+            return normalize_ai_json(response.text)
         except Exception as exc:
             logger.error("AI classify_text failed: %s", exc)
-            return default_fallback
+            return []
 
     async def parse_voice(
         self,
         audio_bytes: bytes,
         mime_type: str,
         categories: List[str]
-    ) -> Dict[str, Any]:
+    ) -> List[Dict[str, Any]]:
         """
         In-memory voice message processing via types.Part.from_bytes.
-        Never saves .ogg files to disk.
+        Extracts all mentioned items.
         """
-        default_fallback = {"category": "Обязательные расходы", "type": "expense", "amount": None, "item_name": "Голосовая запись"}
         if not self.client:
-            return default_fallback
+            return []
 
         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
         prompt = (
-            f"Прослушай аудиосообщение о расходе или доходе.\n"
+            f"Прослушай аудиосообщение и выдели ВСЕ упомянутые расходы и доходы.\n"
             f"Доступные категории: {', '.join(categories)}.\n"
-            f"Верни JSON со следующими полями:\n"
-            f'{{"category": "название из категорий", "type": "expense" или "income", "amount": число_больше_0, "item_name": "название покупки", "raw_text": "распознанный текст"}}\n'
+            f"Каждую позицию выдели отдельно. Название каждой позиции (item_name) пиши с заглавной буквы.\n"
+            f"Верни ответ строго в виде JSON-массива объектов со следующими полями:\n"
+            f'[\n'
+            f'  {{"category": "название из категорий", "type": "expense" или "income", "amount": число, "item_name": "Название позиции", "raw_text": "распознанный текст"}}\n'
+            f']\n'
         )
 
         try:
@@ -117,38 +115,33 @@ class AIService:
                     temperature=0.1
                 )
             )
-            items = normalize_ai_json(response.text)
-            if not items:
-                return default_fallback
-            primary = items[0]
-            if len(items) > 1:
-                primary["_additional_items"] = items[1:]
-            return primary
+            return normalize_ai_json(response.text)
         except Exception as exc:
             logger.error("AI parse_voice failed: %s", exc)
-            return default_fallback
+            return []
 
     async def parse_receipt_photo(
         self,
         image_bytes: bytes,
         mime_type: str,
         categories: List[str]
-    ) -> Dict[str, Any]:
+    ) -> List[Dict[str, Any]]:
         """
         In-memory receipt photo processing via types.Part.from_bytes.
-        Never saves image files to disk.
+        Extracts receipt totals or items.
         """
-        default_fallback = {"category": "Продукты", "type": "expense", "amount": None, "item_name": "Чек"}
         if not self.client:
-            return default_fallback
+            return []
 
         image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
         prompt = (
             f"Проанализируй фотографию чека/квитанции.\n"
             f"Доступные категории: {', '.join(categories)}.\n"
-            f"Извлеки общую итоговую сумму чека, название магазина или основную покупку, и выбери наиболее подходящую категорию.\n"
-            f"Верни JSON со следующими полями:\n"
-            f'{{"category": "название из категорий", "type": "expense", "amount": итоговая_сумма_числом, "item_name": "магазин/описание"}}\n'
+            f"Извлеки итоговую сумму или отдельные позиции чека. Название позиции (item_name) пиши с заглавной буквы.\n"
+            f"Верни ответ строго в виде JSON-массива объектов:\n"
+            f'[\n'
+            f'  {{"category": "название из категорий", "type": "expense", "amount": число, "item_name": "Название магазина или товара"}}\n'
+            f']\n'
         )
 
         try:
@@ -160,14 +153,8 @@ class AIService:
                     temperature=0.1
                 )
             )
-            items = normalize_ai_json(response.text)
-            if not items:
-                return default_fallback
-            primary = items[0]
-            if len(items) > 1:
-                primary["_additional_items"] = items[1:]
-            return primary
+            return normalize_ai_json(response.text)
         except Exception as exc:
             logger.error("AI parse_receipt_photo failed: %s", exc)
-            return default_fallback
+            return []
 
