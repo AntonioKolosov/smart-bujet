@@ -376,6 +376,16 @@ class TransactionService:
             .where(Transaction.user_id == user_id, Transaction.type == CategoryType.income)
         ) or 0
 
+        # Direct liquid income (excluding interest directly capitalized into deposits)
+        liquid_income_sum = await self.session.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0))
+            .where(
+                Transaction.user_id == user_id,
+                Transaction.type == CategoryType.income,
+                Transaction.asset_account_id.is_(None)
+            )
+        ) or 0
+
         expense_sum = await self.session.scalar(
             select(func.coalesce(func.sum(Transaction.amount), 0))
             .where(Transaction.user_id == user_id, Transaction.type == CategoryType.expense)
@@ -413,7 +423,7 @@ class TransactionService:
 
         current_balance = (
             initial
-            + Decimal(str(income_sum))
+            + Decimal(str(liquid_income_sum))
             - Decimal(str(expense_sum))
             - Decimal(str(transfer_out_sum))
             + Decimal(str(transfer_in_sum))

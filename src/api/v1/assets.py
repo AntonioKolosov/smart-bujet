@@ -140,3 +140,26 @@ async def withdraw_from_asset(
         "status": "ok",
         "balance": float(asset.balance)
     }
+
+
+@router.post("/accrue-interest")
+async def trigger_interest_accrual(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    """Accrue monthly interest across all active deposits for the user."""
+    service = AssetService(session)
+    txs = await service.accrue_monthly_interest_for_all(user_id=current_user.id)
+    return {
+        "status": "ok",
+        "accrued_count": len(txs),
+        "transactions": [
+            {
+                "id": str(t.id),
+                "item_name": t.item_name,
+                "amount": float(t.amount),
+                "asset_account_id": str(t.asset_account_id) if t.asset_account_id else None
+            }
+            for t in txs
+        ]
+    }

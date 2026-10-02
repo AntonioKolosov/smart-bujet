@@ -1,4 +1,5 @@
-from decimal import Decimal
+from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Optional, Dict, Any
 import uuid
 
@@ -200,3 +201,106 @@ class AssetService:
             "total_assets": float(round(total_assets_base, 2)),
             "accounts": account_list
         }
+
+    async def accrue_monthly_interest_for_account(
+        self,
+        account: AssetAccount,
+        target_date: Optional[datetime] = None
+    ) -> Optional[Transaction]:
+        """Accrues monthly interest for a single deposit account with strict idempotency."""
+        if account.type != AssetType.deposit or not account.interest_rate or account.interest_rate <= 0:
+            return None
+        if account.balance <= 0 or not account.is_active:
+            return None
+
+        now = target_date or datetime.now(timezone.utc)
+        start_of_month = datetime(now.year, now.month, 1, 0, 0, 0, tzinfo=timezone.utc)
+        if now.month == 12:
+            end_of_month = datetime(now.year + 1, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        else:
+            end_of_month = datetime(now.year, now.month + 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+        # 1. Resolve interest category
+        interest_cat = await self.category_service.find_by_name(
+            "Проценты по вкладу", CategoryType.income, account.user_id
+        )
+        if not interest_cat:
+            interest_cat = Category(
+                name="Проценты по вкладу",
+                type=CategoryType.income,
+                is_system=True
+            )
+            self.session.add(interest_cat)
+            await self.session.flush()
+
+        # 2. Idempotency Check: check if interest was already credited for this deposit in this month
+        existing_id = await self.session.scalar(
+            select(Transaction.id).where(
+                Transaction.asset_account_id == account.id,
+                Transaction.category_id == interest_cat.id,
+                Transaction.transaction_date >= start_of_month,
+                Transaction.transaction_date < end_of_month,
+            )
+        )
+        if existing_id:
+            return None
+
+        # 3. Calculation with Decimal precision: annual rate / 12
+        bal_dec = Decimal(str(account.balance))
+        rate_dec = Decimal(str(account.interest_rate)) / Decimal("100")
+        monthly_interest = (bal_dec * rate_dec / Decimal("12")).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+
+        if monthly_interest <= Decimal("0.00"):
+            return None
+
+        # 4. Mutate deposit balance
+        account.balance = float(Decimal(str(account.balance)) + monthly_interest)
+
+        # 5. Create Income Transaction
+        MONTH_NAMES_RU = [
+            "", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+            "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
+        ]
+        month_label = f"{MONTH_NAMES_RU[now.month]} {now.year}"
+        tx = Transaction(
+            user_id=account.user_id,
+            category_id=interest_cat.id,
+            asset_account_id=account.id,
+            amount=float(monthly_interest),
+            type=CategoryType.income,
+            item_name=f"Проценты: {account.name}",
+            raw_text=f"Ежемесячное начисление процентов за {month_label} ({account.interest_rate}% год.)",
+            source=TransactionSource.manual,
+            transaction_date=now,
+        )
+        self.session.add(tx)
+        await self.session.commit()
+        await self.session.refresh(account)
+        return tx
+
+    async def accrue_monthly_interest_for_all(
+        self,
+        user_id: Optional[int] = None,
+        target_date: Optional[datetime] = None
+    ) -> List[Transaction]:
+        """Runs interest accrual across active deposits with interest rates."""
+        query = select(AssetAccount).where(
+            AssetAccount.type == AssetType.deposit,
+            AssetAccount.is_active == True,
+            AssetAccount.interest_rate.isnot(None),
+            AssetAccount.interest_rate > 0,
+            AssetAccount.balance > 0,
+        )
+        if user_id is not None:
+            query = query.where(AssetAccount.user_id == user_id)
+
+        res = await self.session.scalars(query)
+        accounts = list(res.all())
+        created_txs = []
+        for acc in accounts:
+            tx = await self.accrue_monthly_interest_for_account(acc, target_date=target_date)
+            if tx:
+                created_txs.append(tx)
+        return created_txs

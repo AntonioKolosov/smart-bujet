@@ -245,14 +245,9 @@
         const timeTag = document.createElement('span');
         timeTag.textContent = formatTime(tx.transaction_date);
 
-        const sourceTag = document.createElement('span');
-        sourceTag.className = 'tx-source-badge';
-        sourceTag.textContent = SOURCE_LABELS[tx.source] || tx.source;
-
         meta.appendChild(categoryTag);
         meta.appendChild(dot);
         meta.appendChild(timeTag);
-        meta.appendChild(sourceTag);
 
         info.appendChild(title);
         info.appendChild(meta);

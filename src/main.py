@@ -12,6 +12,8 @@ from src.bot.bot import bot, dp
 from src.api.v1.router import api_router
 from src.services.category_service import CategoryService
 
+from src.core.accrual_scheduler import accrual_background_loop
+
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
@@ -46,6 +48,9 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("Could not set chat menu button or commands: %s", exc)
 
+    # Start monthly deposit interest accrual background scheduler
+    accrual_task = asyncio.create_task(accrual_background_loop(async_session_maker))
+
     polling_task = None
     if settings.bot_token and settings.domain and settings.domain != "localhost" and ":" not in settings.domain:
         await bot.set_webhook(url=settings.webhook_url, secret_token=settings.webhook_secret)
@@ -55,6 +60,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    accrual_task.cancel()
     if polling_task:
         polling_task.cancel()
     elif settings.bot_token and settings.domain and settings.domain != "localhost":
