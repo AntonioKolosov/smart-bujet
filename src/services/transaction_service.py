@@ -19,7 +19,6 @@ from src.services.category_service import CategoryService
 from src.services.asset_service import AssetService
 from src.services.ai_service import AIService
 from src.services.discount_service import DiscountDistributor
-from src.bot.bot import bot
 from src.bot.messages import format_amount
 
 logger = logging.getLogger(__name__)
@@ -124,6 +123,7 @@ class TransactionService:
     ) -> None:
         """Send instant bot notification to partner about incoming transfer."""
         try:
+            from src.bot.bot import bot
             amt_str = format_amount(amount, currency)
             text = (
                 f"💰 <b>{sender_name}</b> перевел(а) вам <b>{amt_str}</b>.\n"
