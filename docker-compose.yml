@@ -38,7 +38,7 @@ services:
       resources:
         limits:
           cpus: '0.40'
-          memory: 200M
+          memory: 240M
 
 networks:
   smart_bujet_net:
