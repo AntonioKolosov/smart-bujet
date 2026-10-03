@@ -29,6 +29,59 @@ PARTNER_TRANSFER_REGEX = re.compile(
 )
 
 
+class BatchCategoryResolver:
+    """
+    Unified in-memory resolver and memoizer for batch transaction processing.
+    Eliminates read and write N+1 database queries across text, voice, and photo processing.
+    """
+    def __init__(self, service: "TransactionService", user_id: int):
+        self.service = service
+        self.user_id = user_id
+        self.alias_cache: dict[Tuple[str, Optional[CategoryType]], Optional[Category]] = {}
+        self.resolve_cache: dict[Tuple[str, CategoryType], Optional[Category]] = {}
+        self.fallback_cache: dict[CategoryType, Optional[Category]] = {}
+        self.saved_aliases: set[str] = set()
+
+    async def resolve(
+        self,
+        item: dict,
+        normalized_name: str,
+        cat_type: CategoryType
+    ) -> Optional[Category]:
+        alias_key = (normalized_name, cat_type)
+        if alias_key not in self.alias_cache:
+            self.alias_cache[alias_key] = await self.service._get_alias_category(
+                self.user_id, normalized_name, cat_type
+            )
+        category = self.alias_cache[alias_key]
+
+        if not category and item.get("category"):
+            resolve_key = (item["category"], cat_type)
+            if resolve_key not in self.resolve_cache:
+                self.resolve_cache[resolve_key] = await self.service._resolve_category(
+                    item["category"], cat_type, self.user_id
+                )
+            category = self.resolve_cache[resolve_key]
+
+        if not category:
+            if cat_type not in self.fallback_cache:
+                cats = await self.service.category_service.get_categories(self.user_id, cat_type)
+                self.fallback_cache[cat_type] = cats[0] if cats else None
+            category = self.fallback_cache[cat_type]
+
+        return category
+
+    async def record_alias(self, normalized_name: str, category: Optional[Category]) -> None:
+        if not category:
+            return
+        alias_key = (normalized_name, category.type)
+        self.alias_cache[alias_key] = category
+
+        if normalized_name not in self.saved_aliases:
+            await self.service._save_alias(self.user_id, normalized_name, category.id)
+            self.saved_aliases.add(normalized_name)
+
+
 class TransactionService:
     def __init__(self, session: AsyncSession, ai_service: Optional[AIService] = None):
         self.session = session
@@ -290,9 +343,7 @@ class TransactionService:
         transactions: List[Transaction] = []
         notified_partners: List[Tuple[User, float]] = []
 
-        alias_cache = {}
-        resolve_cache = {}
-        fallback_cache = {}
+        resolver = BatchCategoryResolver(self, user_id)
 
         for item in raw_items:
             try:
@@ -307,22 +358,7 @@ class TransactionService:
             normalized_name = ParserService.normalize_item_name(raw_name)
             cat_type = CategoryType(item.get("type", "expense"))
 
-            alias_key = (normalized_name, cat_type)
-            if alias_key not in alias_cache:
-                alias_cache[alias_key] = await self._get_alias_category(user_id, normalized_name, cat_type)
-            category = alias_cache[alias_key]
-
-            if not category and item.get("category"):
-                resolve_key = (item["category"], cat_type)
-                if resolve_key not in resolve_cache:
-                    resolve_cache[resolve_key] = await self._resolve_category(item["category"], cat_type, user_id)
-                category = resolve_cache[resolve_key]
-
-            if not category:
-                if cat_type not in fallback_cache:
-                    cats = await self.category_service.get_categories(user_id, cat_type)
-                    fallback_cache[cat_type] = cats[0] if cats else None
-                category = fallback_cache[cat_type]
+            category = await resolver.resolve(item, normalized_name, cat_type)
 
             orig_amt = item.get("original_amount")
             disc_amt = item.get("discount_amount")
@@ -361,7 +397,7 @@ class TransactionService:
             )
             tx.category = category
             self.session.add(tx)
-            await self._save_alias(user_id, normalized_name, category.id)
+            await resolver.record_alias(normalized_name, category)
             transactions.append(tx)
 
             # Check and handle intra-family transfer mirror
@@ -428,6 +464,8 @@ class TransactionService:
         notified_partners: List[Tuple[User, float]] = []
         last_raw_text = None
 
+        resolver = BatchCategoryResolver(self, user_id)
+
         for item in raw_items:
             try:
                 amt = Decimal(str(item.get("amount", 0) or 0))
@@ -443,12 +481,7 @@ class TransactionService:
             raw_name = item.get("item_name") or last_raw_text or fallback_name
             normalized_name = ParserService.normalize_item_name(raw_name)
 
-            category = await self._get_alias_category(user_id, normalized_name, cat_type)
-            if not category and item.get("category"):
-                category = await self._resolve_category(item["category"], cat_type, user_id)
-            if not category:
-                cats = await self.category_service.get_categories(user_id, cat_type)
-                category = cats[0]
+            category = await resolver.resolve(item, normalized_name, cat_type)
 
             orig_amt = item.get("original_amount")
             disc_amt = item.get("discount_amount")
@@ -487,7 +520,7 @@ class TransactionService:
             )
             tx.category = category
             self.session.add(tx)
-            await self._save_alias(user_id, normalized_name, category.id)
+            await resolver.record_alias(normalized_name, category)
             transactions.append(tx)
 
             # Check and handle intra-family transfer mirror
@@ -542,9 +575,7 @@ class TransactionService:
 
         transactions: List[Transaction] = []
 
-        alias_cache = {}
-        resolve_cache = {}
-        fallback_cache = {}
+        resolver = BatchCategoryResolver(self, user_id)
 
         for item in raw_items:
             try:
@@ -559,22 +590,7 @@ class TransactionService:
             normalized_name = ParserService.normalize_item_name(raw_name)
             cat_type = CategoryType(item.get("type", "expense"))
 
-            alias_key = (normalized_name, cat_type)
-            if alias_key not in alias_cache:
-                alias_cache[alias_key] = await self._get_alias_category(user_id, normalized_name, cat_type)
-            category = alias_cache[alias_key]
-
-            if not category and item.get("category"):
-                resolve_key = (item["category"], cat_type)
-                if resolve_key not in resolve_cache:
-                    resolve_cache[resolve_key] = await self._resolve_category(item["category"], cat_type, user_id)
-                category = resolve_cache[resolve_key]
-
-            if not category:
-                if cat_type not in fallback_cache:
-                    cats = await self.category_service.get_categories(user_id, cat_type)
-                    fallback_cache[cat_type] = cats[0] if cats else None
-                category = fallback_cache[cat_type]
+            category = await resolver.resolve(item, normalized_name, cat_type)
 
             orig_amt = item.get("original_amount")
             disc_amt = item.get("discount_amount")
@@ -593,7 +609,7 @@ class TransactionService:
             )
             tx.category = category
             self.session.add(tx)
-            await self._save_alias(user_id, normalized_name, category.id)
+            await resolver.record_alias(normalized_name, category)
             transactions.append(tx)
 
         if not transactions:
