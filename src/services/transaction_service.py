@@ -290,6 +290,10 @@ class TransactionService:
         transactions: List[Transaction] = []
         notified_partners: List[Tuple[User, float]] = []
 
+        alias_cache = {}
+        resolve_cache = {}
+        fallback_cache = {}
+
         for item in raw_items:
             try:
                 amt = Decimal(str(item.get("amount", 0) or 0))
@@ -303,12 +307,22 @@ class TransactionService:
             normalized_name = ParserService.normalize_item_name(raw_name)
             cat_type = CategoryType(item.get("type", "expense"))
 
-            category = await self._get_alias_category(user_id, normalized_name, cat_type)
+            alias_key = (normalized_name, cat_type)
+            if alias_key not in alias_cache:
+                alias_cache[alias_key] = await self._get_alias_category(user_id, normalized_name, cat_type)
+            category = alias_cache[alias_key]
+
             if not category and item.get("category"):
-                category = await self._resolve_category(item["category"], cat_type, user_id)
+                resolve_key = (item["category"], cat_type)
+                if resolve_key not in resolve_cache:
+                    resolve_cache[resolve_key] = await self._resolve_category(item["category"], cat_type, user_id)
+                category = resolve_cache[resolve_key]
+
             if not category:
-                cats = await self.category_service.get_categories(user_id, cat_type)
-                category = cats[0]
+                if cat_type not in fallback_cache:
+                    cats = await self.category_service.get_categories(user_id, cat_type)
+                    fallback_cache[cat_type] = cats[0] if cats else None
+                category = fallback_cache[cat_type]
 
             orig_amt = item.get("original_amount")
             disc_amt = item.get("discount_amount")
@@ -527,6 +541,11 @@ class TransactionService:
         )
 
         transactions: List[Transaction] = []
+
+        alias_cache = {}
+        resolve_cache = {}
+        fallback_cache = {}
+
         for item in raw_items:
             try:
                 amt = Decimal(str(item.get("amount", 0) or 0))
@@ -540,12 +559,22 @@ class TransactionService:
             normalized_name = ParserService.normalize_item_name(raw_name)
             cat_type = CategoryType(item.get("type", "expense"))
 
-            category = await self._get_alias_category(user_id, normalized_name, cat_type)
+            alias_key = (normalized_name, cat_type)
+            if alias_key not in alias_cache:
+                alias_cache[alias_key] = await self._get_alias_category(user_id, normalized_name, cat_type)
+            category = alias_cache[alias_key]
+
             if not category and item.get("category"):
-                category = await self._resolve_category(item["category"], cat_type, user_id)
+                resolve_key = (item["category"], cat_type)
+                if resolve_key not in resolve_cache:
+                    resolve_cache[resolve_key] = await self._resolve_category(item["category"], cat_type, user_id)
+                category = resolve_cache[resolve_key]
+
             if not category:
-                cats = await self.category_service.get_categories(user_id, cat_type)
-                category = cats[0]
+                if cat_type not in fallback_cache:
+                    cats = await self.category_service.get_categories(user_id, cat_type)
+                    fallback_cache[cat_type] = cats[0] if cats else None
+                category = fallback_cache[cat_type]
 
             orig_amt = item.get("original_amount")
             disc_amt = item.get("discount_amount")
