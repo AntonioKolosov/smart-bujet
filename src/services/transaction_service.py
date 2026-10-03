@@ -133,45 +133,7 @@ class TransactionService:
         except Exception as exc:
             logger.warning("Failed to send transfer notification to partner %s: %s", partner_id, exc)
 
-    async def _get_alias_category(
-        self,
-        user_id: int,
-        item_name: str,
-        cat_type: Optional[CategoryType] = None
-    ) -> Optional[Category]:
-        """Local alias lookup (10-15 ms) without sending requests to Gemini."""
-        normalized = item_name.strip().lower()
-        query = select(UserItemAlias).where(
-            UserItemAlias.user_id == user_id,
-            UserItemAlias.item_name_normalized == normalized
-        )
-        alias = await self.session.scalar(query)
-        if alias:
-            cat = await self.session.get(Category, alias.category_id)
-            if cat and (cat_type is None or cat.type == cat_type):
-                alias.usage_count += 1
-                return cat
-        return None
 
-    async def _save_alias(self, user_id: int, item_name: str, category_id: int) -> None:
-        """Cache user item alias for future fast lookups."""
-        normalized = item_name.strip().lower()
-        query = select(UserItemAlias).where(
-            UserItemAlias.user_id == user_id,
-            UserItemAlias.item_name_normalized == normalized
-        )
-        alias = await self.session.scalar(query)
-        if alias:
-            alias.category_id = category_id
-            alias.usage_count += 1
-        else:
-            new_alias = UserItemAlias(
-                user_id=user_id,
-                item_name_normalized=normalized,
-                category_id=category_id,
-                usage_count=1
-            )
-            self.session.add(new_alias)
 
     async def _resolve_category(
         self,
@@ -185,6 +147,36 @@ class TransactionService:
             categories = await self.category_service.get_categories(user_id, cat_type)
             cat = categories[0] if categories else None
         return cat
+
+    async def _preload_aliases(self, user_id: int, normalized_names: set) -> dict:
+        """Batch load aliases for a user."""
+        if not normalized_names:
+            return {}
+        query = select(UserItemAlias).where(
+            UserItemAlias.user_id == user_id,
+            UserItemAlias.item_name_normalized.in_(normalized_names)
+        )
+        result = await self.session.scalars(query)
+        return {alias.item_name_normalized: alias for alias in result.all()}
+
+    def _resolve_category_sync(
+        self,
+        category_name: str,
+        cat_type: CategoryType,
+        available_categories: list
+    ) -> Category:
+        """Find category by name strictly respecting cat_type from a preloaded list, or fallback to first category of that type."""
+        search_name = category_name.strip().lower()
+
+        for cat in available_categories:
+            if cat.type == cat_type and cat.name.strip().lower() == search_name:
+                return cat
+
+        for cat in available_categories:
+            if cat.type == cat_type:
+                return cat
+
+        return None
 
     async def _handle_asset_transfer(
         self,
@@ -249,6 +241,8 @@ class TransactionService:
         user = await self.session.get(User, user_id)
         family_group_id = user.family_group_id if user else None
 
+        available_cats = await self.category_service.get_categories(user_id)
+
         parsed = ParserService.parse_text(text)
         raw_items: List[dict] = []
         discount_percent = None
@@ -290,6 +284,14 @@ class TransactionService:
         transactions: List[Transaction] = []
         notified_partners: List[Tuple[User, float]] = []
 
+        # Preload aliases for this batch
+        all_normalized_names = set()
+        for item in raw_items:
+            raw_name = item.get("item_name") or text
+            all_normalized_names.add(ParserService.normalize_item_name(raw_name))
+
+        aliases_map = await self._preload_aliases(user_id, all_normalized_names)
+
         for item in raw_items:
             try:
                 amt = Decimal(str(item.get("amount", 0) or 0))
@@ -303,12 +305,18 @@ class TransactionService:
             normalized_name = ParserService.normalize_item_name(raw_name)
             cat_type = CategoryType(item.get("type", "expense"))
 
-            category = await self._get_alias_category(user_id, normalized_name, cat_type)
+            category = None
+            alias = aliases_map.get(normalized_name)
+            if alias:
+                cat = next((c for c in available_cats if c.id == alias.category_id), None)
+                if cat and cat.type == cat_type:
+                    alias.usage_count += 1
+                    category = cat
+
             if not category and item.get("category"):
-                category = await self._resolve_category(item["category"], cat_type, user_id)
+                category = self._resolve_category_sync(item["category"], cat_type, available_cats)
             if not category:
-                cats = await self.category_service.get_categories(user_id, cat_type)
-                category = cats[0]
+                category = next((c for c in available_cats if c.type == cat_type), None)
 
             orig_amt = item.get("original_amount")
             disc_amt = item.get("discount_amount")
@@ -347,7 +355,20 @@ class TransactionService:
             )
             tx.category = category
             self.session.add(tx)
-            await self._save_alias(user_id, normalized_name, category.id)
+
+            # Update or create alias
+            if alias:
+                alias.category_id = category.id
+            else:
+                new_alias = UserItemAlias(
+                    user_id=user_id,
+                    item_name_normalized=normalized_name,
+                    category_id=category.id,
+                    usage_count=1
+                )
+                self.session.add(new_alias)
+                aliases_map[normalized_name] = new_alias
+
             transactions.append(tx)
 
             # Check and handle intra-family transfer mirror
@@ -414,6 +435,16 @@ class TransactionService:
         notified_partners: List[Tuple[User, float]] = []
         last_raw_text = None
 
+        all_normalized_names = set()
+        for item in raw_items:
+            temp_last_raw_text = item.get("raw_text")
+            cat_type = CategoryType(item.get("type", "expense"))
+            fallback_name = "Доход" if cat_type == CategoryType.income else ("Перевод" if "transfer" in cat_type.value else "Расход")
+            raw_name = item.get("item_name") or temp_last_raw_text or fallback_name
+            all_normalized_names.add(ParserService.normalize_item_name(raw_name))
+
+        aliases_map = await self._preload_aliases(user_id, all_normalized_names)
+
         for item in raw_items:
             try:
                 amt = Decimal(str(item.get("amount", 0) or 0))
@@ -429,12 +460,18 @@ class TransactionService:
             raw_name = item.get("item_name") or last_raw_text or fallback_name
             normalized_name = ParserService.normalize_item_name(raw_name)
 
-            category = await self._get_alias_category(user_id, normalized_name, cat_type)
+            category = None
+            alias = aliases_map.get(normalized_name)
+            if alias:
+                cat = next((c for c in available_cats if c.id == alias.category_id), None)
+                if cat and cat.type == cat_type:
+                    alias.usage_count += 1
+                    category = cat
+
             if not category and item.get("category"):
-                category = await self._resolve_category(item["category"], cat_type, user_id)
+                category = self._resolve_category_sync(item["category"], cat_type, available_cats)
             if not category:
-                cats = await self.category_service.get_categories(user_id, cat_type)
-                category = cats[0]
+                category = next((c for c in available_cats if c.type == cat_type), None)
 
             orig_amt = item.get("original_amount")
             disc_amt = item.get("discount_amount")
@@ -473,7 +510,20 @@ class TransactionService:
             )
             tx.category = category
             self.session.add(tx)
-            await self._save_alias(user_id, normalized_name, category.id)
+
+            # Update or create alias
+            if alias:
+                alias.category_id = category.id
+            else:
+                new_alias = UserItemAlias(
+                    user_id=user_id,
+                    item_name_normalized=normalized_name,
+                    category_id=category.id,
+                    usage_count=1
+                )
+                self.session.add(new_alias)
+                aliases_map[normalized_name] = new_alias
+
             transactions.append(tx)
 
             # Check and handle intra-family transfer mirror
@@ -527,6 +577,14 @@ class TransactionService:
         )
 
         transactions: List[Transaction] = []
+
+        all_normalized_names = set()
+        for item in raw_items:
+            raw_name = item.get("item_name") or "Чек"
+            all_normalized_names.add(ParserService.normalize_item_name(raw_name))
+
+        aliases_map = await self._preload_aliases(user_id, all_normalized_names)
+
         for item in raw_items:
             try:
                 amt = Decimal(str(item.get("amount", 0) or 0))
@@ -540,12 +598,18 @@ class TransactionService:
             normalized_name = ParserService.normalize_item_name(raw_name)
             cat_type = CategoryType(item.get("type", "expense"))
 
-            category = await self._get_alias_category(user_id, normalized_name, cat_type)
+            category = None
+            alias = aliases_map.get(normalized_name)
+            if alias:
+                cat = next((c for c in available_cats if c.id == alias.category_id), None)
+                if cat and cat.type == cat_type:
+                    alias.usage_count += 1
+                    category = cat
+
             if not category and item.get("category"):
-                category = await self._resolve_category(item["category"], cat_type, user_id)
+                category = self._resolve_category_sync(item["category"], cat_type, available_cats)
             if not category:
-                cats = await self.category_service.get_categories(user_id, cat_type)
-                category = cats[0]
+                category = next((c for c in available_cats if c.type == cat_type), None)
 
             orig_amt = item.get("original_amount")
             disc_amt = item.get("discount_amount")
@@ -564,7 +628,20 @@ class TransactionService:
             )
             tx.category = category
             self.session.add(tx)
-            await self._save_alias(user_id, normalized_name, category.id)
+
+            # Update or create alias
+            if alias:
+                alias.category_id = category.id
+            else:
+                new_alias = UserItemAlias(
+                    user_id=user_id,
+                    item_name_normalized=normalized_name,
+                    category_id=category.id,
+                    usage_count=1
+                )
+                self.session.add(new_alias)
+                aliases_map[normalized_name] = new_alias
+
             transactions.append(tx)
 
         if not transactions:
