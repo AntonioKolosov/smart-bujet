@@ -30,8 +30,15 @@ async def lifespan(app: FastAPI):
         category_service = CategoryService(session)
         await category_service.seed_default_categories()
 
+    is_real_token = (
+        bool(settings.bot_token)
+        and settings.bot_token != "123456789:TEST_BOT_TOKEN_FOR_INIT_TESTS"
+        and "dummy" not in settings.bot_token.lower()
+        and "test_token" not in settings.bot_token.lower()
+    )
+
     # Configure Telegram Menu Button and Bot Commands for instant MiniApp access
-    if settings.bot_token:
+    if is_real_token:
         try:
             domain = settings.domain
             if not domain or domain == "localhost":
@@ -64,9 +71,9 @@ async def lifespan(app: FastAPI):
     accrual_task = asyncio.create_task(accrual_background_loop(async_session_maker))
 
     polling_task = None
-    if settings.bot_token and settings.domain and settings.domain != "localhost" and ":" not in settings.domain:
+    if is_real_token and settings.domain and settings.domain != "localhost" and ":" not in settings.domain:
         await bot.set_webhook(url=settings.webhook_url, secret_token=settings.webhook_secret)
-    elif settings.bot_token:
+    elif is_real_token:
         await bot.delete_webhook(drop_pending_updates=True)
         polling_task = asyncio.create_task(dp.start_polling(bot))
 
@@ -75,7 +82,7 @@ async def lifespan(app: FastAPI):
     accrual_task.cancel()
     if polling_task:
         polling_task.cancel()
-    elif settings.bot_token and settings.domain and settings.domain != "localhost":
+    elif is_real_token and settings.domain and settings.domain != "localhost":
         await bot.delete_webhook()
     await engine.dispose()
 

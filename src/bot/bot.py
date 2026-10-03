@@ -1,12 +1,26 @@
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.utils.token import validate_token, TokenValidationError
 from src.core.config import settings
 from src.bot.handlers import start, text_tx, voice_tx, photo_tx, family
 from src.bot.middlewares.db_session import DbSessionMiddleware
 
+DUMMY_FALLBACK_TOKEN = "123456789:TEST_BOT_TOKEN_FOR_INIT_TESTS"
+
+
+def _resolve_bot_token() -> str:
+    candidate = (settings.bot_token or "").strip()
+    try:
+        if candidate and validate_token(candidate):
+            return candidate
+    except (TokenValidationError, Exception):
+        pass
+    return DUMMY_FALLBACK_TOKEN
+
+
 bot = Bot(
-    token=settings.bot_token or "123456789:AAG_placeholder_token_for_init",
+    token=_resolve_bot_token(),
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 

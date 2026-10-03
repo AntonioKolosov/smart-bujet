@@ -22,7 +22,7 @@ Jules runs tasks inside an Ubuntu VM with Python 3.12 preinstalled.
 # 1. Ensure development .env is present
 if [ ! -f .env ]; then
   cat << 'EOF' > .env
-BOT_TOKEN=dummy_telegram_bot_token_for_tests
+BOT_TOKEN=123456789:TEST_BOT_TOKEN_FOR_INIT_TESTS
 GOOGLE_API_KEY=dummy_gemini_api_key_for_tests
 DATABASE_URL=postgresql+asyncpg://bujet_user:secure_db_pass@localhost:5432/smart_bujet
 WEBHOOK_DOMAIN=localhost
