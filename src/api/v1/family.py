@@ -1,5 +1,4 @@
 import logging
-from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_db, get_current_user
 from src.models.user import User
 from src.services.family_service import FamilyService
-from src.schemas.family import FamilySummaryResponse, FamilyTransactionItem, FamilyGroupRead
+from src.schemas.family import FamilySummaryResponse, FamilyTransactionItem
 from src.bot.bot import bot
 
 logger = logging.getLogger(__name__)
@@ -27,7 +26,7 @@ async def get_family_summary(
     return await service.get_family_summary(current_user)
 
 
-@router.get("/transactions", response_model=List[FamilyTransactionItem])
+@router.get("/transactions", response_model=list[FamilyTransactionItem])
 async def get_family_transactions(
     limit: int = Query(60, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -51,14 +50,14 @@ async def join_family_group(
 
     if partner_id:
         try:
-            author_title = current_user.first_name or f"@{current_user.username}" or "Партнёр"
+            author_title = current_user.first_name or (f"@{current_user.username}" if current_user.username else "Партнёр")
             await bot.send_message(
                 partner_id,
                 f"🎉 <b>{author_title}</b> присоединился(лась) к вашей семейной группе <b>«{group.name}»</b>!\n"
                 f"Теперь ваши расходы и доходы синхронизированы в MiniApp."
             )
-        except Exception as exc:
-            logger.warning("Failed to notify partner on join: %s", exc)
+        except Exception:
+            logger.exception("Failed to notify partner on join")
 
     return {"success": True, "message": msg, "group_name": group.name}
 
@@ -75,13 +74,13 @@ async def leave_family_group(
 
     if partner_id:
         try:
-            author_title = current_user.first_name or f"@{current_user.username}" or "Партнёр"
+            author_title = current_user.first_name or (f"@{current_user.username}" if current_user.username else "Партнёр")
             await bot.send_message(
                 partner_id,
                 f"ℹ️ <b>{author_title}</b> покинул(а) семейную группу.\n"
                 f"Семейный бюджет больше не синхронизируется."
             )
-        except Exception as exc:
-            logger.warning("Failed to notify partner on leave: %s", exc)
+        except Exception:
+            logger.exception("Failed to notify partner on leave")
 
     return {"success": True}

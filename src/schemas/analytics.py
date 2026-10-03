@@ -1,8 +1,8 @@
 from pydantic import BaseModel
-from typing import Dict, Any
+from typing import Any
 
 class ReportResponse(BaseModel):
     total_expenses: str
     total_income: str
     currency: str
-    details: Dict[str, Any] = {}
+    details: dict[str, Any] = {}

@@ -64,7 +64,6 @@ class TestPerformanceReceiptAndVoice(unittest.IsolatedAsyncioTestCase):
 
         async def mock_find_by_name(*args, **kwargs):
             await asyncio.sleep(0.001)
-            return None
 
         transaction_service.category_service.get_categories = AsyncMock(side_effect=mock_get_categories)
         transaction_service.category_service.find_by_name = AsyncMock(side_effect=mock_find_by_name)
@@ -74,12 +73,10 @@ class TestPerformanceReceiptAndVoice(unittest.IsolatedAsyncioTestCase):
             nonlocal save_alias_call_count
             save_alias_call_count += 1
             await asyncio.sleep(0.001)
-            return None
         transaction_service._save_alias = AsyncMock(side_effect=mock_save_alias)
 
         async def mock_get_alias_category(*args, **kwargs):
             await asyncio.sleep(0.001)
-            return None
 
         async def mock_resolve_category(*args, **kwargs):
             await asyncio.sleep(0.001)

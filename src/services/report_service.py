@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, List
+from typing import Any
 from uuid import UUID
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,9 +14,9 @@ class ReportService:
     async def get_summary(
         self,
         user_id: int,
-        family_group_id: Optional[UUID] = None,
+        family_group_id: UUID | None = None,
         period: str = "month"  # "week", "month", "year"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate financial summary and category breakdown for a given period."""
         now = datetime.now(timezone.utc)
         if period == "week":

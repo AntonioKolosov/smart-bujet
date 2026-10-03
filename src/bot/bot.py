@@ -14,8 +14,9 @@ def _resolve_bot_token() -> str:
     try:
         if candidate and validate_token(candidate):
             return candidate
-    except (TokenValidationError, Exception):
-        pass
+    except (TokenValidationError, Exception) as exc:
+        import logging
+        logging.getLogger(__name__).warning("Token validation failed: %s", exc)
     return DUMMY_FALLBACK_TOKEN
 
 

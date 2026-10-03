@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional, List
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
@@ -19,8 +18,8 @@ class FamilyGroupRead(BaseModel):
 
 class FamilyMemberInfo(BaseModel):
     id: int
-    first_name: Optional[str] = None
-    username: Optional[str] = None
+    first_name: str | None = None
+    username: str | None = None
     currency: str = "KZT"
     current_balance: float = 0.0
     month_expense: float = 0.0
@@ -36,15 +35,15 @@ class FamilySummaryResponse(BaseModel):
     name: str
     status: str  # "single_member" | "active_family"
     is_owner: bool
-    invite_code: Optional[str] = None
-    invite_link: Optional[str] = None
+    invite_code: str | None = None
+    invite_link: str | None = None
     member_count: int
     combined_balance: float
     combined_month_expense: float
     combined_month_income: float
     currency: str
     month_period_name: str
-    members: List[FamilyMemberInfo]
+    members: list[FamilyMemberInfo]
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -53,16 +52,16 @@ class FamilyTransactionItem(BaseModel):
     id: UUID
     user_id: int
     author_name: str
-    author_username: Optional[str] = None
+    author_username: str | None = None
     is_current_user: bool
     amount: float
-    original_amount: Optional[float] = None
-    discount_amount: Optional[float] = None
+    original_amount: float | None = None
+    discount_amount: float | None = None
     type: str
-    category_id: Optional[int] = None
-    category_name: Optional[str] = None
-    item_name: Optional[str] = None
-    raw_text: Optional[str] = None
+    category_id: int | None = None
+    category_name: str | None = None
+    item_name: str | None = None
+    raw_text: str | None = None
     source: str
     transaction_date: datetime
 

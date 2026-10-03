@@ -1,6 +1,5 @@
 import re
 from decimal import Decimal, InvalidOperation
-from typing import Optional, Tuple
 
 CURRENCY_SUFFIXES = r"(?:руб(?:лей|ля|\.)?|р\b|тг\b|тенге|kzt\b|rub\b|usd\b|\$|€)"
 
@@ -17,7 +16,7 @@ class ParserService:
         return cleaned[0].upper() + cleaned[1:]
 
     @staticmethod
-    def parse_text(text: str) -> Optional[Tuple[Decimal, str]]:
+    def parse_text(text: str) -> Optional[tuple[Decimal, str]]:
         """
         Fast regex-based extraction of amount and item name from user message.
         Examples:

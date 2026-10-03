@@ -53,6 +53,6 @@ async def process_photo_transaction(message: Message, session: AsyncSession, bot
     except (InvalidTransactionAmountError, TransactionParseError):
         await message.reply(BotMessages.photo_clarification())
     except Exception as exc:
-        logger.error("Error processing receipt photo: %s", exc, exc_info=True)
+        logger.exception("Error processing receipt photo: %s", exc)
         await message.reply(BotMessages.service_unavailable())
 

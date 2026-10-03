@@ -1,4 +1,4 @@
-from typing import Optional, Sequence
+from typing import Sequence
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.category import Category, CategoryType
@@ -49,8 +49,8 @@ class CategoryService:
 
     async def get_categories(
         self,
-        user_id: Optional[int] = None,
-        cat_type: Optional[CategoryType] = None
+        user_id: int | None = None,
+        cat_type: CategoryType | None = None
     ) -> Sequence[Category]:
         """Fetch system categories and user-specific custom categories."""
         conditions = [
@@ -66,9 +66,9 @@ class CategoryService:
     async def find_by_name(
         self,
         name: str,
-        cat_type: Optional[CategoryType] = None,
-        user_id: Optional[int] = None
-    ) -> Optional[Category]:
+        cat_type: CategoryType | None = None,
+        user_id: int | None = None
+    ) -> Category | None:
         """Find category by name (case-insensitive) prioritizing user over system."""
         conditions = [
             Category.name.ilike(name.strip()),

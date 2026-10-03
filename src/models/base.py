@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Annotated
 
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func

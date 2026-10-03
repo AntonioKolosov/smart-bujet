@@ -69,6 +69,6 @@ async def process_text_transaction(message: Message, session: AsyncSession):
     except (InvalidTransactionAmountError, TransactionParseError):
         await message.reply(BotMessages.text_clarification())
     except Exception as exc:
-        logger.error("Error processing text transaction: %s", exc, exc_info=True)
+        logger.exception("Error processing text transaction: %s", exc)
         await message.reply(BotMessages.service_unavailable())
 

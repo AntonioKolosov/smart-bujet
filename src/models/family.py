@@ -1,11 +1,14 @@
 import uuid
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import String, ForeignKey, BigInteger
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
 from src.models.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from src.models.user import User
+    from src.models.transaction import Transaction
 
 
 class FamilyGroup(Base, TimestampMixin):

@@ -1,10 +1,14 @@
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Integer, String, BigInteger, Boolean, UniqueConstraint, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from src.models.alias import UserItemAlias
+    from src.models.transaction import Transaction
 
 
 class CategoryType(str, Enum):
@@ -18,7 +22,7 @@ class Category(Base, TimestampMixin):
     __tablename__ = "categories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.id"))
+    user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
     name: Mapped[str] = mapped_column(String(64))
     type: Mapped[CategoryType] = mapped_column()
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)

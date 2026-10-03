@@ -139,8 +139,6 @@ async def process_currency(callback: CallbackQuery, session: AsyncSession):
         )
     else:
         miniapp_url = get_miniapp_url()
-        tx_service = TransactionService(session)
-        bal_data = await tx_service.get_user_balance(user_id)
         await callback.message.edit_text(
             BotMessages.currency_updated(currency),
             reply_markup=welcome_back_keyboard(miniapp_url=miniapp_url)

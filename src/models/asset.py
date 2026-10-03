@@ -1,11 +1,15 @@
 import uuid
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, String, Numeric, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from src.models.user import User
+    from src.models.transaction import Transaction
 
 
 class AssetType(str, Enum):
@@ -24,7 +28,7 @@ class AssetAccount(Base, TimestampMixin):
     type: Mapped[AssetType] = mapped_column(String(32), default=AssetType.deposit)
     currency: Mapped[str] = mapped_column(String(3), default="KZT")
     balance: Mapped[float] = mapped_column(Numeric(14, 2), default=0.0)
-    interest_rate: Mapped[Optional[float]] = mapped_column(Numeric(5, 2), nullable=True)
+    interest_rate: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     user: Mapped["User"] = relationship("User", backref="asset_accounts")

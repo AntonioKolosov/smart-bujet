@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from decimal import Decimal
-from typing import Optional, Dict, Any, List
+from typing import Any
 from google import genai
 from google.genai import types
 from src.core.config import settings
@@ -10,14 +10,14 @@ from src.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-def normalize_receipt_payload(raw_text: str) -> Dict[str, Any]:
+def normalize_receipt_payload(raw_text: str) -> dict[str, Any]:
     """
     Parses JSON from Gemini and returns a normalized payload:
     {
-      "items": List[Dict[str, Any]],
-      "discount_percent": Optional[float],
-      "discount_amount": Optional[float],
-      "total_paid": Optional[float]
+      "items": list[dict[str, Any]],
+      "discount_percent": float | None,
+      "discount_amount": float | None,
+      "total_paid": float | None
     }
     """
     clean_text = raw_text.strip()
@@ -50,13 +50,13 @@ def normalize_receipt_payload(raw_text: str) -> Dict[str, Any]:
 
 
 class AIService:
-    def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
+    def __init__(self, api_key: str | None = None, model_name: str | None = None):
         self.api_key = api_key or settings.google_token
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.model_name = model_name or settings.gemini_model
 
     @staticmethod
-    def _format_assets_context(assets_context: Optional[List[Dict[str, Any]]]) -> str:
+    def _format_assets_context(assets_context: Optional[list[dict[str, Any]]]) -> str:
         if not assets_context:
             return ""
         lines = [
@@ -72,9 +72,9 @@ class AIService:
     async def classify_text(
         self,
         text: str,
-        categories: List[str],
-        assets_context: Optional[List[Dict[str, Any]]] = None
-    ) -> Dict[str, Any]:
+        categories: list[str],
+        assets_context: Optional[list[dict[str, Any]]] = None
+    ) -> dict[str, Any]:
         """Classify message into items and optional discount parameters."""
         if not self.client:
             return {
@@ -131,9 +131,9 @@ class AIService:
         self,
         audio_bytes: bytes,
         mime_type: str,
-        categories: List[str],
-        assets_context: Optional[List[Dict[str, Any]]] = None
-    ) -> Dict[str, Any]:
+        categories: list[str],
+        assets_context: Optional[list[dict[str, Any]]] = None
+    ) -> dict[str, Any]:
         """In-memory voice message processing with discount and income extraction."""
         if not self.client:
             return {"items": []}
@@ -183,8 +183,8 @@ class AIService:
         self,
         image_bytes: bytes,
         mime_type: str,
-        categories: List[str]
-    ) -> Dict[str, Any]:
+        categories: list[str]
+    ) -> dict[str, Any]:
         """In-memory receipt photo processing with discount and total extraction."""
         if not self.client:
             return {"items": []}

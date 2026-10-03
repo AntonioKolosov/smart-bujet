@@ -55,6 +55,6 @@ async def process_voice_transaction(message: Message, session: AsyncSession, bot
     except TransactionParseError:
         await message.reply(BotMessages.voice_clarification())
     except Exception as exc:
-        logger.error("Error processing voice transaction: %s", exc, exc_info=True)
+        logger.exception("Error processing voice transaction: %s", exc)
         await message.reply(BotMessages.service_unavailable())
 

@@ -1,8 +1,6 @@
 import secrets
 import logging
 from datetime import datetime, timezone
-from typing import Optional, List, Tuple
-from uuid import UUID
 from sqlalchemy import select, or_, desc, func
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,7 +66,7 @@ class FamilyService:
             .order_by(desc(User.id == group.owner_id), User.id)
         )
         members_res = await self.session.scalars(members_query)
-        members: List[User] = members_res.all()
+        members: list[User] = members_res.all()
 
         members_info = []
         combined_balance = 0.0
@@ -152,7 +150,7 @@ class FamilyService:
             "members": members_info
         }
 
-    async def get_family_transactions(self, user: User, limit: int = 60, offset: int = 0) -> List[dict]:
+    async def get_family_transactions(self, user: User, limit: int = 60, offset: int = 0) -> list[dict]:
         """
         Joint Feed:
         Fetches all transactions for family members with author badges without N+1 overhead.
@@ -224,7 +222,7 @@ class FamilyService:
             })
         return result
 
-    async def join_by_invite(self, user: User, invite_code: str) -> Tuple[Optional[FamilyGroup], Optional[int], str]:
+    async def join_by_invite(self, user: User, invite_code: str) -> tuple[FamilyGroup | None, int | None, str]:
         """
         Joins an existing group by deep-link invite code.
         Returns: (group, partner_id_to_notify, message)
@@ -264,7 +262,7 @@ class FamilyService:
 
         return group, partner_id, f"Вы успешно присоединились к группе «{group.name}»!"
 
-    async def leave_group(self, user: User) -> Tuple[bool, Optional[int]]:
+    async def leave_group(self, user: User) -> tuple[bool, int | None]:
         """
         Leaves current family group. Returns (success, partner_id_to_notify).
         """

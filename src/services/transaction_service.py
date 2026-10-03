@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional, Tuple, List, Any
+from typing import Any
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,9 +37,9 @@ class BatchCategoryResolver:
     def __init__(self, service: "TransactionService", user_id: int):
         self.service = service
         self.user_id = user_id
-        self.alias_cache: dict[Tuple[str, Optional[CategoryType]], Optional[Category]] = {}
-        self.resolve_cache: dict[Tuple[str, CategoryType], Optional[Category]] = {}
-        self.fallback_cache: dict[CategoryType, Optional[Category]] = {}
+        self.alias_cache: dict[tuple[str, CategoryType | None], Category | None] = {}
+        self.resolve_cache: dict[tuple[str, CategoryType], Category | None] = {}
+        self.fallback_cache: dict[CategoryType, Category | None] = {}
         self.saved_aliases: set[str] = set()
 
     async def resolve(
@@ -47,7 +47,7 @@ class BatchCategoryResolver:
         item: dict,
         normalized_name: str,
         cat_type: CategoryType
-    ) -> Optional[Category]:
+    ) -> Category | None:
         alias_key = (normalized_name, cat_type)
         if alias_key not in self.alias_cache:
             self.alias_cache[alias_key] = await self.service._get_alias_category(
@@ -71,7 +71,7 @@ class BatchCategoryResolver:
 
         return category
 
-    async def record_alias(self, normalized_name: str, category: Optional[Category]) -> None:
+    async def record_alias(self, normalized_name: str, category: Category | None) -> None:
         if not category:
             return
         alias_key = (normalized_name, category.type)
@@ -83,13 +83,13 @@ class BatchCategoryResolver:
 
 
 class TransactionService:
-    def __init__(self, session: AsyncSession, ai_service: Optional[AIService] = None):
+    def __init__(self, session: AsyncSession, ai_service: AIService | None = None):
         self.session = session
         self.ai_service = ai_service or AIService()
         self.category_service = CategoryService(session)
         self.asset_service = AssetService(session)
 
-    async def _detect_family_partner(self, user: User, text: str, item_name: str) -> Optional[User]:
+    async def _detect_family_partner(self, user: User, text: str, item_name: str) -> User | None:
         """Detect if the transaction is directed to the user's family partner."""
         if not user.family_group_id:
             return None
@@ -124,10 +124,10 @@ class TransactionService:
 
     async def _handle_intra_family_mirror(
         self,
-        sender: Optional[User],
+        sender: User | None,
         primary_tx: Transaction,
-        context_text: Optional[str] = None
-    ) -> Optional[User]:
+        context_text: str | None = None
+    ) -> User | None:
         """
         Creates mirror income transaction for family partner if primary transaction is an expense transfer to partner.
         Returns the partner User if mirrored, else None.
@@ -190,8 +190,8 @@ class TransactionService:
         self,
         user_id: int,
         item_name: str,
-        cat_type: Optional[CategoryType] = None
-    ) -> Optional[Category]:
+        cat_type: CategoryType | None = None
+    ) -> Category | None:
         """Local alias lookup (10-15 ms) without sending requests to Gemini."""
         normalized = item_name.strip().lower()
         query = select(UserItemAlias).where(
@@ -242,13 +242,13 @@ class TransactionService:
     async def _handle_asset_transfer(
         self,
         user_id: int,
-        user: Optional[User],
+        user: User | None,
         item: dict,
         cat_type: CategoryType,
         amt: Decimal,
-        asset_amt: Optional[Any],
-        context_text: Optional[str] = None
-    ) -> Tuple[uuid.UUID, str]:
+        asset_amt: Any | None,
+        context_text: str | None = None
+    ) -> tuple[uuid.UUID, str]:
         raw_curr = item.get("target_currency")
         target_currency = (
             raw_curr.strip().upper()
@@ -293,7 +293,7 @@ class TransactionService:
 
         return asset_acc.id, asset_acc.name
 
-    async def process_text(self, user_id: int, text: str) -> List[Transaction]:
+    async def process_text(self, user_id: int, text: str) -> list[Transaction]:
         """
         Multi-item capable text transaction processing:
         1. Fast Regex parsing (single item)
@@ -303,7 +303,7 @@ class TransactionService:
         family_group_id = user.family_group_id if user else None
 
         parsed = ParserService.parse_text(text)
-        raw_items: List[dict] = []
+        raw_items: list[dict] = []
         discount_percent = None
         discount_amount = None
         total_paid = None
@@ -340,8 +340,8 @@ class TransactionService:
             total_paid=total_paid,
         )
 
-        transactions: List[Transaction] = []
-        notified_partners: List[Tuple[User, float]] = []
+        transactions: list[Transaction] = []
+        notified_partners: list[tuple[User, float]] = []
 
         resolver = BatchCategoryResolver(self, user_id)
 
@@ -430,7 +430,7 @@ class TransactionService:
         user_id: int,
         audio_bytes: bytes,
         mime_type: str = "audio/ogg"
-    ) -> List[Transaction]:
+    ) -> list[Transaction]:
         """Process voice message in-memory without saving .ogg to disk."""
         user = await self.session.get(User, user_id)
         family_group_id = user.family_group_id if user else None
@@ -460,8 +460,8 @@ class TransactionService:
             total_paid=payload.get("total_paid"),
         )
 
-        transactions: List[Transaction] = []
-        notified_partners: List[Tuple[User, float]] = []
+        transactions: list[Transaction] = []
+        notified_partners: list[tuple[User, float]] = []
         last_raw_text = None
 
         resolver = BatchCategoryResolver(self, user_id)
@@ -553,7 +553,7 @@ class TransactionService:
         user_id: int,
         image_bytes: bytes,
         mime_type: str = "image/jpeg"
-    ) -> List[Transaction]:
+    ) -> list[Transaction]:
         """Process receipt photo in-memory without saving image to disk."""
         user = await self.session.get(User, user_id)
         family_group_id = user.family_group_id if user else None
@@ -573,7 +573,7 @@ class TransactionService:
             total_paid=payload.get("total_paid"),
         )
 
-        transactions: List[Transaction] = []
+        transactions: list[Transaction] = []
 
         resolver = BatchCategoryResolver(self, user_id)
 

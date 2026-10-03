@@ -2,7 +2,6 @@ import asyncio
 import calendar
 import logging
 from datetime import datetime, timezone
-from typing import Optional, List
 
 from src.models.transaction import Transaction
 from src.services.asset_service import AssetService
@@ -18,8 +17,8 @@ def is_last_day_of_month(target_dt: datetime) -> bool:
 
 async def execute_accrual_check(
     session_maker,
-    target_date: Optional[datetime] = None
-) -> List[Transaction]:
+    target_date: datetime | None = None
+) -> list[Transaction]:
     """Execute monthly interest accrual across active deposit accounts."""
     async with session_maker() as session:
         service = AssetService(session)
@@ -37,7 +36,7 @@ async def accrual_background_loop(session_maker, check_interval_seconds: int = 3
     logger.info("Starting deposit interest accrual background scheduler loop...")
     while True:
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(datetime.UTC)
             # Accrue on the last day of the calendar month (28/29 in Feb, 30 or 31 in other months)
             if is_last_day_of_month(now):
                 await execute_accrual_check(session_maker, target_date=now)

@@ -27,3 +27,28 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-v"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",       # pycodestyle errors
+    "W",       # pycodestyle warnings
+    "F",       # pyflakes
+    "I",       # isort
+    "UP",      # pyupgrade (Python 3.12 syntax)
+    "PLR2044", # empty comment lines (#)
+    "RUF022",  # sort __all__
+    "SIM",     # flake8-simplify
+    "G",       # flake8-logging-format
+]
+ignore = [
+    "B008",    # FastAPI dependency injection defaults
+    "BLE001",  # Do not catch blind exception (critical for resilience boundaries)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+

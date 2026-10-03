@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
-from typing import List, Optional, Dict, Any
+from typing import Any
 import uuid
 
 from sqlalchemy import select
@@ -19,7 +19,7 @@ class AssetService:
         self.session = session
         self.category_service = CategoryService(session)
 
-    async def get_user_assets(self, user_id: int) -> List[AssetAccount]:
+    async def get_user_assets(self, user_id: int) -> list[AssetAccount]:
         """Fetch all active personal asset accounts for user (isolated to user only)."""
         res = await self.session.scalars(
             select(AssetAccount)
@@ -28,7 +28,7 @@ class AssetService:
         )
         return list(res.all())
 
-    async def get_accessible_assets(self, user_id: int) -> List[AssetAccount]:
+    async def get_accessible_assets(self, user_id: int) -> list[AssetAccount]:
         """Fetch active asset accounts for user (strictly personal)."""
         return await self.get_user_assets(user_id)
 
@@ -46,11 +46,11 @@ class AssetService:
     async def resolve_asset_account(
         self,
         user_id: int,
-        target_name: Optional[str] = None,
-        target_type: Optional[AssetType] = None,
-        target_currency: Optional[str] = None,
-        asset_id_hint: Optional[str] = None
-    ) -> Optional[AssetAccount]:
+        target_name: str | None = None,
+        target_type: AssetType | None = None,
+        target_currency: str | None = None,
+        asset_id_hint: str | None = None
+    ) -> AssetAccount | None:
         """
         Multi-tier deterministic and fuzzy matching for asset accounts:
         1. Exact UUID hint match.
@@ -127,7 +127,7 @@ class AssetService:
         user_id: int,
         asset_type: AssetType = AssetType.deposit,
         currency: str = "KZT",
-        name: Optional[str] = None
+        name: str | None = None
     ) -> AssetAccount:
         """Find an existing asset of matching type/currency or create a sensible default."""
         safe_currency = currency.strip().upper() if currency and currency.strip().upper() not in ("NONE", "NULL", "") else "KZT"
@@ -169,7 +169,7 @@ class AssetService:
         asset_type: AssetType,
         currency: str = "KZT",
         initial_balance: float = 0.0,
-        interest_rate: Optional[float] = None
+        interest_rate: float | None = None
     ) -> AssetAccount:
         account = AssetAccount(
             user_id=user_id,
@@ -189,7 +189,7 @@ class AssetService:
         user_id: int,
         asset_id: uuid.UUID,
         amount: float,
-        note: Optional[str] = None
+        note: str | None = None
     ) -> AssetAccount:
         """Transfer funds from main balance into asset account."""
         account = await self.session.get(AssetAccount, asset_id)
@@ -225,7 +225,7 @@ class AssetService:
         user_id: int,
         asset_id: uuid.UUID,
         amount: float,
-        note: Optional[str] = None
+        note: str | None = None
     ) -> AssetAccount:
         """Withdraw funds from asset into main liquid balance."""
         account = await self.session.get(AssetAccount, asset_id)
@@ -256,7 +256,7 @@ class AssetService:
         await self.session.refresh(account)
         return account
 
-    async def get_portfolio_summary(self, user_id: int) -> Dict[str, Any]:
+    async def get_portfolio_summary(self, user_id: int) -> dict[str, Any]:
         """Aggregate total net worth: liquid balance + deposits + currencies."""
         accounts = await self.get_user_assets(user_id)
         user = await self.session.get(User, user_id)
@@ -302,8 +302,8 @@ class AssetService:
     async def accrue_monthly_interest_for_account(
         self,
         account: AssetAccount,
-        target_date: Optional[datetime] = None
-    ) -> Optional[Transaction]:
+        target_date: datetime | None = None
+    ) -> Transaction | None:
         """Accrues monthly interest for a single deposit account with strict idempotency."""
         if account.type != AssetType.deposit or not account.interest_rate or account.interest_rate <= 0:
             return None
@@ -379,9 +379,9 @@ class AssetService:
 
     async def accrue_monthly_interest_for_all(
         self,
-        user_id: Optional[int] = None,
-        target_date: Optional[datetime] = None
-    ) -> List[Transaction]:
+        user_id: int | None = None,
+        target_date: datetime | None = None
+    ) -> list[Transaction]:
         """Runs interest accrual across active deposits with interest rates."""
         query = select(AssetAccount).where(
             AssetAccount.type == AssetType.deposit,

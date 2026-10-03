@@ -1,5 +1,4 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional
 
 class CategoryCreate(BaseModel):
     name: str
@@ -7,7 +6,7 @@ class CategoryCreate(BaseModel):
 
 class CategoryRead(BaseModel):
     id: int
-    user_id: Optional[int] = None
+    user_id: int | None = None
     name: str
     type: str
     is_system: bool

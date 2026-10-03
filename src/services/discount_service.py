@@ -1,15 +1,17 @@
+import logging
 from decimal import Decimal, ROUND_HALF_UP, ROUND_FLOOR
-from typing import List, Dict, Any, Optional
+from typing import Any
 
+logger = logging.getLogger(__name__)
 
 class DiscountDistributor:
     @staticmethod
     def distribute(
-        items: List[Dict[str, Any]],
-        discount_percent: Optional[float] = None,
-        discount_amount: Optional[float] = None,
-        total_paid: Optional[float] = None,
-    ) -> List[Dict[str, Any]]:
+        items: list[dict[str, Any]],
+        discount_percent: float | None = None,
+        discount_amount: float | None = None,
+        total_paid: float | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Deterministically distributes discount across expense items using the Largest Remainder Method (Hamilton Algorithm).
         Reconciles every penny/tiyn so sum(item.amount) == total_paid.
@@ -37,30 +39,29 @@ class DiscountDistributor:
                 t_paid = Decimal(str(total_paid))
                 if Decimal("0") < t_paid < base_sum:
                     discount_val = base_sum - t_paid
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Error parsing total_paid: {e}")
 
         if discount_val <= Decimal("0") and discount_amount is not None:
             try:
                 d_amt = Decimal(str(discount_amount))
                 if Decimal("0") < d_amt < base_sum:
                     discount_val = d_amt
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Error parsing discount_amount: {e}")
 
         if discount_val <= Decimal("0") and discount_percent is not None:
             try:
                 pct = Decimal(str(discount_percent))
                 if Decimal("0") < pct < Decimal("100"):
                     discount_val = (base_sum * (pct / Decimal("100"))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Error parsing discount_percent: {e}")
 
         if discount_val <= Decimal("0"):
             return items
 
         # Largest Remainder Method
-        exact_discounts = []
         floor_discounts = []
         remainders = []
 
@@ -79,7 +80,7 @@ class DiscountDistributor:
         # Sort remainders descending by remainder, then by item amount
         remainders.sort(key=lambda x: (x[0], x[1]), reverse=True)
 
-        final_discounts: Dict[int, Decimal] = {}
+        final_discounts: dict[int, Decimal] = {}
         for rank, (rem, item_amt, idx) in enumerate(remainders):
             bonus = Decimal("0.01") if rank < unallocated_cents else Decimal("0")
             item_pos = expense_indices.index(idx)
