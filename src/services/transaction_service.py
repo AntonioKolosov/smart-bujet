@@ -1,25 +1,26 @@
-import uuid
-import re
 import asyncio
 import logging
-from datetime import datetime, timezone
+import re
+import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Optional, Tuple, List, Any
-from sqlalchemy import select, func
+from typing import Any
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.user import User
+from src.bot.messages import format_amount
+from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError
+from src.models.alias import UserItemAlias
+from src.models.asset import AssetType
 from src.models.category import Category, CategoryType
 from src.models.transaction import Transaction, TransactionSource
-from src.models.alias import UserItemAlias
-from src.models.asset import AssetAccount, AssetType
-from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError
-from src.services.parser_service import ParserService
-from src.services.category_service import CategoryService
-from src.services.asset_service import AssetService
+from src.models.user import User
 from src.services.ai_service import AIService
+from src.services.asset_service import AssetService
+from src.services.category_service import CategoryService
 from src.services.discount_service import DiscountDistributor
-from src.bot.messages import format_amount
+from src.services.parser_service import ParserService
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +31,13 @@ PARTNER_TRANSFER_REGEX = re.compile(
 
 
 class TransactionService:
-    def __init__(self, session: AsyncSession, ai_service: Optional[AIService] = None):
+    def __init__(self, session: AsyncSession, ai_service: AIService | None = None):
         self.session = session
         self.ai_service = ai_service or AIService()
         self.category_service = CategoryService(session)
         self.asset_service = AssetService(session)
 
-    async def _detect_family_partner(self, user: User, text: str, item_name: str) -> Optional[User]:
+    async def _detect_family_partner(self, user: User, text: str, item_name: str) -> User | None:
         """Detect if the transaction is directed to the user's family partner."""
         if not user.family_group_id:
             return None
@@ -69,12 +70,104 @@ class TransactionService:
 
         return None
 
+
+    async def _preload_category_maps(self, user_id: int):
+        available_cats = await self.category_service.get_categories(user_id)
+        cat_names = list({c.name for c in available_cats})
+
+        cat_by_id = {c.id: c for c in available_cats}
+
+        # Priority: User categories override system categories
+        cat_by_name_type = {}
+        for c in available_cats:
+            key = (c.name.strip().lower(), c.type)
+            if key not in cat_by_name_type or not c.is_system:
+                cat_by_name_type[key] = c
+
+        cats_by_type = {}
+        for c in available_cats:
+            if c.type not in cats_by_type:
+                cats_by_type[c.type] = []
+            cats_by_type[c.type].append(c)
+
+        aliases_query = select(UserItemAlias).where(UserItemAlias.user_id == user_id)
+        aliases_result = await self.session.scalars(aliases_query)
+        # Store the actual object to update usage_count or replace it
+        aliases_map = {alias.item_name_normalized: alias for alias in aliases_result.all()}
+
+        return {
+            "available_cats": available_cats,
+            "cat_names": cat_names,
+            "cat_by_id": cat_by_id,
+            "cat_by_name_type": cat_by_name_type,
+            "cats_by_type": cats_by_type,
+            "aliases_map": aliases_map
+        }
+
+    def _resolve_category_from_maps(
+        self,
+        maps: dict,
+        normalized_name: str,
+        cat_type: CategoryType,
+        raw_category_name: str | None
+    ) -> Category:
+        normalized_lower = normalized_name.strip().lower()
+
+        # 1. Check alias
+        alias = maps["aliases_map"].get(normalized_lower)
+        if alias:
+            cat = maps["cat_by_id"].get(alias.category_id)
+            if cat and cat.type == cat_type:
+                alias.usage_count += 1
+                return cat
+
+        # 2. Check explicitly provided category name
+        if raw_category_name:
+            cat_name_lower = raw_category_name.strip().lower()
+            cat = maps["cat_by_name_type"].get((cat_name_lower, cat_type))
+            if cat:
+                return cat
+
+        # 3. Fallback to first available category of the requested type
+        type_cats = maps["cats_by_type"].get(cat_type)
+        if type_cats:
+            return type_cats[0]
+
+        # 4. Ultimate fallback (should never happen if DB is seeded properly)
+        if maps["available_cats"]:
+            return maps["available_cats"][0]
+
+        raise RuntimeError(f"No categories available for type {cat_type}")
+
+    def _update_or_create_alias_in_memory(
+        self,
+        maps: dict,
+        user_id: int,
+        item_name: str,
+        category_id: int
+    ) -> UserItemAlias | None:
+        normalized = item_name.strip().lower()
+        alias = maps["aliases_map"].get(normalized)
+        if alias:
+            alias.category_id = category_id
+            alias.usage_count += 1
+            return None
+        else:
+            new_alias = UserItemAlias(
+                user_id=user_id,
+                item_name_normalized=normalized,
+                category_id=category_id,
+                usage_count=1
+            )
+            maps["aliases_map"][normalized] = new_alias
+            return new_alias
+
     async def _handle_intra_family_mirror(
         self,
-        sender: Optional[User],
+        sender: User | None,
         primary_tx: Transaction,
-        context_text: Optional[str] = None
-    ) -> Optional[User]:
+        context_text: str | None = None
+    ) -> User | None:
         """
         Creates mirror income transaction for family partner if primary transaction is an expense transfer to partner.
         Returns the partner User if mirrored, else None.
@@ -137,8 +230,8 @@ class TransactionService:
         self,
         user_id: int,
         item_name: str,
-        cat_type: Optional[CategoryType] = None
-    ) -> Optional[Category]:
+        cat_type: CategoryType | None = None
+    ) -> Category | None:
         """Local alias lookup (10-15 ms) without sending requests to Gemini."""
         normalized = item_name.strip().lower()
         query = select(UserItemAlias).where(
@@ -189,13 +282,13 @@ class TransactionService:
     async def _handle_asset_transfer(
         self,
         user_id: int,
-        user: Optional[User],
+        user: User | None,
         item: dict,
         cat_type: CategoryType,
         amt: Decimal,
-        asset_amt: Optional[Any],
-        context_text: Optional[str] = None
-    ) -> Tuple[uuid.UUID, str]:
+        asset_amt: Any | None,
+        context_text: str | None = None
+    ) -> tuple[uuid.UUID, str]:
         raw_curr = item.get("target_currency")
         target_currency = (
             raw_curr.strip().upper()
@@ -240,7 +333,7 @@ class TransactionService:
 
         return asset_acc.id, asset_acc.name
 
-    async def process_text(self, user_id: int, text: str) -> List[Transaction]:
+    async def process_text(self, user_id: int, text: str) -> list[Transaction]:
         """
         Multi-item capable text transaction processing:
         1. Fast Regex parsing (single item)
@@ -250,17 +343,18 @@ class TransactionService:
         family_group_id = user.family_group_id if user else None
 
         parsed = ParserService.parse_text(text)
-        raw_items: List[dict] = []
+        raw_items: list[dict] = []
         discount_percent = None
         discount_amount = None
         total_paid = None
+
+        category_maps = await self._preload_category_maps(user_id)
 
         if parsed:
             amount, item_name = parsed
             raw_items = [{"amount": amount, "item_name": item_name, "type": "expense", "category": None}]
         else:
-            available_cats = await self.category_service.get_categories(user_id)
-            cat_names = list({c.name for c in available_cats})
+            cat_names = category_maps["cat_names"]
             accessible_assets = await self.asset_service.get_accessible_assets(user_id)
             assets_context = [
                 {
@@ -287,28 +381,26 @@ class TransactionService:
             total_paid=total_paid,
         )
 
-        transactions: List[Transaction] = []
-        notified_partners: List[Tuple[User, float]] = []
+        transactions: list[Transaction] = []
+        notified_partners: list[tuple[User, float]] = []
+        new_aliases = []
 
         for item in raw_items:
             try:
                 amt = Decimal(str(item.get("amount", 0) or 0))
             except Exception:
-                amt = Decimal("0")
+                amt = Decimal(0)
 
-            if amt <= Decimal("0"):
+            if amt <= Decimal(0):
                 continue
 
             raw_name = item.get("item_name") or text
             normalized_name = ParserService.normalize_item_name(raw_name)
             cat_type = CategoryType(item.get("type", "expense"))
 
-            category = await self._get_alias_category(user_id, normalized_name, cat_type)
-            if not category and item.get("category"):
-                category = await self._resolve_category(item["category"], cat_type, user_id)
-            if not category:
-                cats = await self.category_service.get_categories(user_id, cat_type)
-                category = cats[0]
+            category = self._resolve_category_from_maps(
+                category_maps, normalized_name, cat_type, item.get("category")
+            )
 
             orig_amt = item.get("original_amount")
             disc_amt = item.get("discount_amount")
@@ -347,7 +439,13 @@ class TransactionService:
             )
             tx.category = category
             self.session.add(tx)
-            await self._save_alias(user_id, normalized_name, category.id)
+
+            new_alias = self._update_or_create_alias_in_memory(
+                category_maps, user_id, normalized_name, category.id
+            )
+            if new_alias:
+                new_aliases.append(new_alias)
+
             transactions.append(tx)
 
             # Check and handle intra-family transfer mirror
@@ -357,6 +455,9 @@ class TransactionService:
 
         if not transactions:
             raise InvalidTransactionAmountError("Amount must be greater than 0", raw_text=text)
+
+        if new_aliases:
+            self.session.add_all(new_aliases)
 
         await self.session.commit()
 
@@ -380,13 +481,14 @@ class TransactionService:
         user_id: int,
         audio_bytes: bytes,
         mime_type: str = "audio/ogg"
-    ) -> List[Transaction]:
+    ) -> list[Transaction]:
         """Process voice message in-memory without saving .ogg to disk."""
         user = await self.session.get(User, user_id)
         family_group_id = user.family_group_id if user else None
 
-        available_cats = await self.category_service.get_categories(user_id)
-        cat_names = list({c.name for c in available_cats})
+        category_maps = await self._preload_category_maps(user_id)
+        cat_names = category_maps["cat_names"]
+
         accessible_assets = await self.asset_service.get_accessible_assets(user_id)
         assets_context = [
             {
@@ -410,17 +512,18 @@ class TransactionService:
             total_paid=payload.get("total_paid"),
         )
 
-        transactions: List[Transaction] = []
-        notified_partners: List[Tuple[User, float]] = []
+        transactions: list[Transaction] = []
+        notified_partners: list[tuple[User, float]] = []
+        new_aliases = []
         last_raw_text = None
 
         for item in raw_items:
             try:
                 amt = Decimal(str(item.get("amount", 0) or 0))
             except Exception:
-                amt = Decimal("0")
+                amt = Decimal(0)
 
-            if amt <= Decimal("0"):
+            if amt <= Decimal(0):
                 continue
 
             last_raw_text = item.get("raw_text")
@@ -429,12 +532,9 @@ class TransactionService:
             raw_name = item.get("item_name") or last_raw_text or fallback_name
             normalized_name = ParserService.normalize_item_name(raw_name)
 
-            category = await self._get_alias_category(user_id, normalized_name, cat_type)
-            if not category and item.get("category"):
-                category = await self._resolve_category(item["category"], cat_type, user_id)
-            if not category:
-                cats = await self.category_service.get_categories(user_id, cat_type)
-                category = cats[0]
+            category = self._resolve_category_from_maps(
+                category_maps, normalized_name, cat_type, item.get("category")
+            )
 
             orig_amt = item.get("original_amount")
             disc_amt = item.get("discount_amount")
@@ -473,7 +573,13 @@ class TransactionService:
             )
             tx.category = category
             self.session.add(tx)
-            await self._save_alias(user_id, normalized_name, category.id)
+
+            new_alias = self._update_or_create_alias_in_memory(
+                category_maps, user_id, normalized_name, category.id
+            )
+            if new_alias:
+                new_aliases.append(new_alias)
+
             transactions.append(tx)
 
             # Check and handle intra-family transfer mirror
@@ -483,6 +589,9 @@ class TransactionService:
 
         if not transactions:
             raise InvalidTransactionAmountError("Amount must be greater than 0", raw_text=last_raw_text)
+
+        if new_aliases:
+            self.session.add_all(new_aliases)
 
         await self.session.commit()
 
@@ -506,13 +615,13 @@ class TransactionService:
         user_id: int,
         image_bytes: bytes,
         mime_type: str = "image/jpeg"
-    ) -> List[Transaction]:
+    ) -> list[Transaction]:
         """Process receipt photo in-memory without saving image to disk."""
         user = await self.session.get(User, user_id)
         family_group_id = user.family_group_id if user else None
 
-        available_cats = await self.category_service.get_categories(user_id)
-        cat_names = list({c.name for c in available_cats})
+        category_maps = await self._preload_category_maps(user_id)
+        cat_names = category_maps["cat_names"]
 
         payload = await self.ai_service.parse_receipt_photo(image_bytes, mime_type, cat_names)
         raw_items = payload.get("items", [])
@@ -526,26 +635,24 @@ class TransactionService:
             total_paid=payload.get("total_paid"),
         )
 
-        transactions: List[Transaction] = []
+        transactions: list[Transaction] = []
+        new_aliases = []
         for item in raw_items:
             try:
                 amt = Decimal(str(item.get("amount", 0) or 0))
             except Exception:
-                amt = Decimal("0")
+                amt = Decimal(0)
 
-            if amt <= Decimal("0"):
+            if amt <= Decimal(0):
                 continue
 
             raw_name = item.get("item_name") or "Чек"
             normalized_name = ParserService.normalize_item_name(raw_name)
             cat_type = CategoryType(item.get("type", "expense"))
 
-            category = await self._get_alias_category(user_id, normalized_name, cat_type)
-            if not category and item.get("category"):
-                category = await self._resolve_category(item["category"], cat_type, user_id)
-            if not category:
-                cats = await self.category_service.get_categories(user_id, cat_type)
-                category = cats[0]
+            category = self._resolve_category_from_maps(
+                category_maps, normalized_name, cat_type, item.get("category")
+            )
 
             orig_amt = item.get("original_amount")
             disc_amt = item.get("discount_amount")
@@ -564,11 +671,20 @@ class TransactionService:
             )
             tx.category = category
             self.session.add(tx)
-            await self._save_alias(user_id, normalized_name, category.id)
+
+            new_alias = self._update_or_create_alias_in_memory(
+                category_maps, user_id, normalized_name, category.id
+            )
+            if new_alias:
+                new_aliases.append(new_alias)
+
             transactions.append(tx)
 
         if not transactions:
             raise InvalidTransactionAmountError("Amount must be greater than 0")
+
+        if new_aliases:
+            self.session.add_all(new_aliases)
 
         await self.session.commit()
         return transactions
@@ -578,12 +694,12 @@ class TransactionService:
         user = await self.session.get(User, user_id)
         initial = Decimal(str(user.initial_balance or 0)) if user and user.initial_balance is not None else Decimal(0)
 
-        now = datetime.now(timezone.utc)
-        start_month = datetime(now.year, now.month, 1, 0, 0, 0, tzinfo=timezone.utc)
+        now = datetime.now(UTC)
+        start_month = datetime(now.year, now.month, 1, 0, 0, 0, tzinfo=UTC)
         if now.month == 12:
-            next_month = datetime(now.year + 1, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+            next_month = datetime(now.year + 1, 1, 1, 0, 0, 0, tzinfo=UTC)
         else:
-            next_month = datetime(now.year, now.month + 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+            next_month = datetime(now.year, now.month + 1, 1, 0, 0, 0, tzinfo=UTC)
 
         MONTH_NAMES_RU = [
             "", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
