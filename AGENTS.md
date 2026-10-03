@@ -41,7 +41,8 @@ pip install pytest pytest-asyncio aiosqlite ruff
 python -m py_compile $(find src scripts tests -name "*.py")
 
 # 4. Run test suite
-pytest -v
+export PYTHONPATH=.
+pytest tests -v
 ```
 Alternatively, execute the bundled setup script:
 ```bash

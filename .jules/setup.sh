@@ -33,6 +33,7 @@ python -c "import src.main; print('✅ FastAPI app and core models loaded succes
 
 # 5. Run test suite
 echo "Running pytest test suite..."
-pytest -q
+export PYTHONPATH=.
+pytest tests -v
 
 echo "=== Jules environment setup completed successfully! ==="
