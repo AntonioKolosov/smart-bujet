@@ -36,4 +36,10 @@ echo "Running pytest test suite..."
 export PYTHONPATH=.
 pytest tests -v
 
+# 6. Clean up transient build artifacts and restore clean working tree for Jules
+echo "Cleaning up transient build artifacts..."
+rm -rf src/*.egg-info *.egg-info .pytest_cache .ruff_cache build/ dist/
+git reset --hard HEAD
+git clean -fd -e .env
+
 echo "=== Jules environment setup completed successfully! ==="

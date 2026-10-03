@@ -43,6 +43,11 @@ python -m py_compile $(find src scripts tests -name "*.py")
 # 4. Run test suite
 export PYTHONPATH=.
 pytest tests -v
+
+# 5. Clean up transient build artifacts and restore clean working tree
+rm -rf src/*.egg-info *.egg-info .pytest_cache .ruff_cache build/ dist/
+git reset --hard HEAD
+git clean -fd -e .env
 ```
 Alternatively, execute the bundled setup script:
 ```bash
