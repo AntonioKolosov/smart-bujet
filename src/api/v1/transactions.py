@@ -1,10 +1,12 @@
+import uuid
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, desc, or_
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_db, get_current_user
-from src.schemas.transaction import TransactionRead, TransactionCreate
+from src.schemas.transaction import TransactionRead, TransactionCreate, TransactionUpdate
+from src.services.transaction_service import TransactionService
 from src.models.user import User
 from src.models.transaction import Transaction, TransactionSource
 from src.models.category import CategoryType
@@ -60,4 +62,18 @@ async def create_transaction(
     await session.commit()
     await session.refresh(tx)
     return tx
+
+@router.patch("/{tx_id}", response_model=TransactionRead)
+async def update_transaction(
+    tx_id: uuid.UUID,
+    data: TransactionUpdate,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    service = TransactionService(session)
+    return await service.update_transaction(
+        user_id=current_user.id,
+        tx_id=tx_id,
+        data=data
+    )
 

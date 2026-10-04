@@ -203,6 +203,22 @@
   const repayCreditAmountInput = document.getElementById('repayCreditAmountInput');
   const repayCreditModalErrorEl = document.getElementById('repayCreditModalError');
 
+  // DOM Elements - Edit Transaction Modal
+  const editTxModal = document.getElementById('editTxModal');
+  const closeEditTxModalBtn = document.getElementById('closeEditTxModalBtn');
+  const cancelEditTxBtn = document.getElementById('cancelEditTxBtn');
+  const editTxForm = document.getElementById('editTxForm');
+  const editTxModalError = document.getElementById('editTxModalError');
+  const editTxIdInput = document.getElementById('editTxId');
+  const editTxTypeInput = document.getElementById('editTxType');
+  const editTxTitleDisplay = document.getElementById('editTxTitleDisplay');
+  const editTxDateDisplay = document.getElementById('editTxDateDisplay');
+  const editTxTypeBadge = document.getElementById('editTxTypeBadge');
+  const editTxCurrencyLabel = document.getElementById('editTxCurrencyLabel');
+  const editTxAmount = document.getElementById('editTxAmount');
+  const editTxCategorySelect = document.getElementById('editTxCategorySelect');
+  const saveEditTxBtn = document.getElementById('saveEditTxBtn');
+
   function getHeaders() {
     const headers = { 'Content-Type': 'application/json' };
     if (tg && tg.initData) {
@@ -459,8 +475,31 @@
           amounts.appendChild(discountEl);
         }
 
+        const actionsWrap = document.createElement('div');
+        actionsWrap.className = 'tx-card-actions';
+        actionsWrap.appendChild(amounts);
+
+        // Edit button - ONLY IN PERSONAL MODE
+        if (currentOpsMode === 'personal') {
+          const editBtn = document.createElement('button');
+          editBtn.className = 'tx-edit-btn';
+          editBtn.title = 'Редактировать операцию';
+          editBtn.setAttribute('aria-label', 'Редактировать операцию');
+          editBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+          `;
+          editBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openEditModal(tx);
+          });
+          actionsWrap.appendChild(editBtn);
+        }
+
         card.appendChild(info);
-        card.appendChild(amounts);
+        card.appendChild(actionsWrap);
         fragment.appendChild(card);
       });
     });
@@ -957,6 +996,142 @@
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.textContent = 'Создать кредит';
+        }
+      }
+    });
+  }
+
+  // --- Category Caching & Edit Transaction Modal ---
+  const cachedCategoriesByType = {};
+
+  async function fetchCategories(type) {
+    const normType = type === 'income' ? 'income' : 'expense';
+    if (cachedCategoriesByType[normType]) {
+      return cachedCategoriesByType[normType];
+    }
+    const res = await fetch(`/api/v1/categories/?type=${normType}`, { headers: getHeaders() });
+    if (!res.ok) throw new Error('Не удалось загрузить категории');
+    const categories = await res.json();
+    cachedCategoriesByType[normType] = categories;
+    return categories;
+  }
+
+  async function openEditModal(tx) {
+    if (!editTxModal) return;
+    if (editTxModalError) {
+      editTxModalError.classList.add('hidden');
+      editTxModalError.textContent = '';
+    }
+
+    editTxIdInput.value = tx.id;
+    editTxTypeInput.value = tx.type;
+    editTxTitleDisplay.textContent = tx.item_name || tx.category_name || 'Операция';
+    editTxDateDisplay.textContent = `${formatDateGroup(tx.transaction_date)} • ${formatTime(tx.transaction_date)}`;
+
+    if (editTxCurrencyLabel) {
+      editTxCurrencyLabel.textContent = currencySymbol;
+    }
+
+    if (editTxTypeBadge) {
+      const isInc = tx.type === 'income';
+      editTxTypeBadge.textContent = isInc ? 'Доход' : 'Расход';
+      editTxTypeBadge.className = `edit-tx-type-badge ${isInc ? 'income' : 'expense'}`;
+    }
+
+    editTxAmount.value = parseFloat(tx.amount).toFixed(2);
+
+    try {
+      const categories = await fetchCategories(tx.type);
+      editTxCategorySelect.innerHTML = categories
+        .map(c => `<option value="${c.id}" ${c.id === tx.category_id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`)
+        .join('');
+
+      // If current category is not in the list, prepend it
+      if (tx.category_id && !categories.some(c => c.id === tx.category_id) && tx.category_name) {
+        const opt = document.createElement('option');
+        opt.value = tx.category_id;
+        opt.textContent = escapeHtml(tx.category_name);
+        opt.selected = true;
+        editTxCategorySelect.prepend(opt);
+      }
+    } catch (e) {
+      if (editTxModalError) {
+        editTxModalError.textContent = e.message || 'Ошибка загрузки категорий';
+        editTxModalError.classList.remove('hidden');
+      }
+    }
+
+    editTxModal.classList.remove('hidden');
+    setTimeout(() => editTxAmount.focus(), 80);
+  }
+
+  function closeEditModal() {
+    if (!editTxModal) return;
+    editTxModal.classList.add('hidden');
+    editTxForm?.reset();
+  }
+
+  if (closeEditTxModalBtn) closeEditTxModalBtn.addEventListener('click', closeEditModal);
+  if (cancelEditTxBtn) cancelEditTxBtn.addEventListener('click', closeEditModal);
+  if (editTxModal) {
+    editTxModal.addEventListener('click', (e) => {
+      if (e.target === editTxModal) closeEditModal();
+    });
+  }
+
+  if (editTxForm) {
+    editTxForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const txId = editTxIdInput.value;
+      const amountVal = parseFloat(editTxAmount.value);
+      const catIdVal = parseInt(editTxCategorySelect.value, 10);
+
+      if (isNaN(amountVal) || amountVal <= 0) {
+        if (editTxModalError) {
+          editTxModalError.textContent = 'Укажите сумму больше 0';
+          editTxModalError.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (saveEditTxBtn) {
+        saveEditTxBtn.disabled = true;
+        saveEditTxBtn.textContent = 'Сохранение...';
+      }
+      if (editTxModalError) editTxModalError.classList.add('hidden');
+
+      try {
+        const payload = {
+          amount: amountVal,
+          category_id: isNaN(catIdVal) ? null : catIdVal
+        };
+
+        const res = await fetch(`/api/v1/transactions/${txId}`, {
+          method: 'PATCH',
+          headers: getHeaders(),
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || `Ошибка обновления (${res.status})`);
+        }
+
+        if (tg?.HapticFeedback?.notificationOccurred) {
+          tg.HapticFeedback.notificationOccurred('success');
+        }
+
+        closeEditModal();
+        await Promise.all([fetchTransactions(), fetchProfile()]);
+      } catch (err) {
+        if (editTxModalError) {
+          editTxModalError.textContent = err.message || 'Не удалось обновить операцию';
+          editTxModalError.classList.remove('hidden');
+        }
+      } finally {
+        if (saveEditTxBtn) {
+          saveEditTxBtn.disabled = false;
+          saveEditTxBtn.textContent = 'Сохранить';
         }
       }
     });

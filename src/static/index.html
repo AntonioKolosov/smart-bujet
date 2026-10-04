@@ -6,7 +6,7 @@
   <title>Smart Bujet — Журнал и Депозиты</title>
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="/static/styles.css?v=2.5">
+  <link rel="stylesheet" href="/static/styles.css?v=2.6">
 </head>
 <body>
   <div id="app" class="container">
@@ -420,6 +420,47 @@
     </div>
   </div>
 
+  <!-- Modal: Edit Transaction -->
+  <div id="editTxModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Редактировать операцию</h3>
+        <button id="closeEditTxModalBtn" class="close-btn">&times;</button>
+      </div>
+      <form id="editTxForm" class="modal-form">
+        <div id="editTxModalError" class="error-banner hidden" style="margin-bottom: 0;"></div>
+        <input type="hidden" id="editTxId" />
+        <input type="hidden" id="editTxType" />
+
+        <!-- Контекстное превью операции -->
+        <div class="edit-tx-card-preview">
+          <div class="edit-tx-info">
+            <span class="edit-tx-title" id="editTxTitleDisplay">Операция</span>
+            <span class="edit-tx-date" id="editTxDateDisplay">12 мая, 14:30</span>
+          </div>
+          <span class="edit-tx-type-badge" id="editTxTypeBadge">Расход</span>
+        </div>
+
+        <label class="form-label">
+          Сумма (<span id="editTxCurrencyLabel">₸</span>)
+          <input type="number" step="0.01" min="0.01" id="editTxAmount" class="form-input" placeholder="0" required inputmode="decimal" />
+        </label>
+
+        <label class="form-label">
+          Категория
+          <select id="editTxCategorySelect" class="form-select" required>
+            <!-- Наполняется динамически -->
+          </select>
+        </label>
+
+        <div class="modal-actions-row">
+          <button type="button" id="cancelEditTxBtn" class="secondary-btn-modal">Отмена</button>
+          <button type="submit" id="saveEditTxBtn" class="modal-submit-btn">Сохранить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Persistent Bottom Navigation Bar -->
   <nav class="bottom-nav">
     <button class="nav-item active" id="navOpsBtn" data-tab="tab-operations">
@@ -440,6 +481,6 @@
     </button>
   </nav>
 
-  <script src="/static/app.js?v=2.5"></script>
+  <script src="/static/app.js?v=2.6"></script>
 </body>
 </html>

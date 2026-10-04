@@ -6,13 +6,17 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from sqlalchemy import select, func
+from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import HTTPException, status
 
 from src.models.user import User
 from src.models.category import Category, CategoryType
 from src.models.transaction import Transaction, TransactionSource
 from src.models.alias import UserItemAlias
 from src.models.asset import AssetAccount, AssetType
+from src.models.credit import CreditAccount
+from src.schemas.transaction import TransactionUpdate
 from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError, OffTopicMessageError
 from src.services.parser_service import ParserService
 from src.services.category_service import CategoryService
@@ -803,4 +807,121 @@ class TransactionService:
             "current_balance": float(current_balance),
             "currency": user.currency if user else "KZT",
         }
+
+    async def update_transaction(
+        self,
+        user_id: int,
+        tx_id: uuid.UUID,
+        data: TransactionUpdate,
+    ) -> Transaction:
+        """
+        Atomically updates a transaction (amount, category, item_name) with ownership validation,
+        category type verification, asset/credit ledger synchronization, and mirror transaction sync.
+        """
+        query = (
+            select(Transaction)
+            .options(joinedload(Transaction.category))
+            .where(Transaction.id == tx_id)
+        )
+        tx = await self.session.scalar(query)
+        if not tx:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Транзакция не найдена"
+            )
+
+        if tx.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Вы можете редактировать только собственные транзакции"
+            )
+
+        # 1. Update category
+        if data.category_id is not None and data.category_id != tx.category_id:
+            if tx.asset_account_id or tx.credit_account_id or tx.related_transaction_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Изменение категории для переводов, вкладов и кредитов недоступно. Допускается только изменение суммы."
+                )
+
+            cat = await self.session.get(Category, data.category_id)
+            if not cat:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Указанная категория не найдена"
+                )
+
+            if not cat.is_system and cat.user_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Вы не можете выбрать категорию другого пользователя"
+                )
+
+            if cat.type != tx.type:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Тип категории ({cat.type.value}) не соответствует типу операции ({tx.type.value})"
+                )
+
+            tx.category_id = cat.id
+            tx.category = cat
+
+        # 2. Update item name
+        if data.item_name is not None:
+            tx.item_name = data.item_name.strip()
+
+        # 3. Update amount and reconcile ledgers
+        if data.amount is not None:
+            old_amount = Decimal(str(tx.amount))
+            new_amount = Decimal(str(data.amount))
+            delta = new_amount - old_amount
+
+            if delta != Decimal("0"):
+                # Asset / Deposit adjustment
+                if tx.asset_account_id:
+                    asset = await self.session.get(AssetAccount, tx.asset_account_id)
+                    if asset:
+                        curr_asset_bal = Decimal(str(asset.balance or 0))
+                        if tx.type == CategoryType.transfer_out:
+                            asset.balance = float(curr_asset_bal + delta)
+                        elif tx.type == CategoryType.transfer_in:
+                            asset.balance = float(curr_asset_bal - delta)
+
+                        if tx.exchange_rate:
+                            tx.asset_amount = float(new_amount * Decimal(str(tx.exchange_rate)))
+                        else:
+                            tx.asset_amount = float(new_amount)
+
+                # Credit repayment adjustment
+                if tx.credit_account_id:
+                    credit = await self.session.get(CreditAccount, tx.credit_account_id)
+                    if credit and tx.type == CategoryType.expense:
+                        curr_rem = Decimal(str(credit.remaining_amount or 0))
+                        new_remaining = curr_rem - delta
+                        if new_remaining < Decimal("0"):
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Сумма платежа не может превышать текущий остаток задолженности"
+                            )
+                        credit.remaining_amount = new_remaining
+                        credit.is_active = (new_remaining > Decimal("0"))
+                        if new_remaining <= Decimal("0") and not credit.closed_at:
+                            credit.closed_at = func.now()
+                        elif new_remaining > Decimal("0") and credit.closed_at:
+                            credit.closed_at = None
+
+                # Intra-family mirror sync
+                if tx.related_transaction_id:
+                    mirror_query = select(Transaction).where(Transaction.id == tx.related_transaction_id)
+                    mirror_tx = await self.session.scalar(mirror_query)
+                    if mirror_tx:
+                        mirror_tx.amount = float(new_amount)
+
+                tx.amount = float(new_amount)
+                tx.discount_amount = None
+                tx.original_amount = None
+
+        await self.session.commit()
+        await self.session.refresh(tx)
+        return tx
 

@@ -243,6 +243,38 @@ body {
   font-weight: 500;
 }
 
+.tx-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tx-edit-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--hint-color);
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  flex-shrink: 0;
+}
+
+.tx-edit-btn:hover {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--link-color);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.tx-edit-btn:active {
+  transform: scale(0.92);
+}
+
 .tx-amounts {
   display: flex;
   flex-direction: column;
@@ -479,6 +511,80 @@ input[type="number"] {
   font-weight: 600;
   cursor: pointer;
   margin-top: 6px;
+}
+
+.modal-actions-row {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.secondary-btn-modal {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-color);
+  border: none;
+  border-radius: 14px;
+  padding: 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.secondary-btn-modal:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.edit-tx-card-preview {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 10px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.edit-tx-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  max-width: 75%;
+}
+
+.edit-tx-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.edit-tx-date {
+  font-size: 0.76rem;
+  color: var(--hint-color);
+}
+
+.edit-tx-type-badge {
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--hint-color);
+}
+
+.edit-tx-type-badge.expense {
+  background: rgba(244, 63, 94, 0.15);
+  color: var(--accent-expense);
+}
+
+.edit-tx-type-badge.income {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--accent-income);
 }
 
 .action-desc {
@@ -1221,5 +1327,29 @@ body.theme-light .rule-text {
 }
 body.theme-light .rule-text b {
   color: #0f172a;
+}
+
+/* Edit Transaction elements in light mode */
+body.theme-light .tx-edit-btn {
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  color: #475569;
+}
+body.theme-light .tx-edit-btn:hover {
+  background: rgba(2, 132, 199, 0.1);
+  color: #0284c7;
+  border-color: rgba(2, 132, 199, 0.3);
+}
+body.theme-light .edit-tx-card-preview {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+body.theme-light .secondary-btn-modal {
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+}
+body.theme-light .secondary-btn-modal:hover {
+  background: #e2e8f0;
 }
 
