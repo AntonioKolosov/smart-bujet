@@ -1,7 +1,7 @@
 # Smart Bujet — System Architecture & Engineering Blueprint
 
-> **Specification Version**: 2.4.0  
-> **Status**: Production Deployed  
+> **Specification Version**: 2.5.0  
+> **Status**: Production Deployed & Hardened  
 > **Target Audience**: Core Engineering Team, Lead System Analysts, DevOps  
 > **Repository**: `https://github.com/AntonioKolosov/smart-bujet`  
 > **Server Host**: `85.198.89.188`  
@@ -12,10 +12,9 @@
 ## 1. Executive Summary & Topology
 
 ### 1.1 Overview
-**Smart Bujet** is an intelligent personal and family financial management ecosystem powered by Google Gemini 3.8 Flash, FastAPI, aiogram 3, PostgreSQL 16, and a Telegram MiniApp. The system provides zero-friction transaction logging through multimodal user inputs (natural text, in-memory voice notes, and receipt photographs) combined with dual-ledger intra-family transfer mechanics, personal deposit tracking with automated compound interest accrual, and privacy-preserving shared accounting.
+**Smart Bujet** is an intelligent personal and family financial management ecosystem powered by Google Gemini 3.8 Flash, FastAPI, aiogram 3, PostgreSQL 16, and a Telegram MiniApp. The system provides zero-friction transaction logging through multimodal inputs (natural text, in-memory voice notes, and receipt photographs) combined with dual-ledger intra-family transfer mechanics, personal deposit tracking with automated compound interest accrual, credit and liability management, interactive bot feedback with dynamic few-shot learning, and privacy-preserving shared accounting.
 
 ### 1.2 High-Level Architecture Topology
-The diagram below illustrates the network boundaries, reverse proxy ingress, container isolation, and external service integrations.
 
 ```mermaid
 flowchart TD
@@ -43,7 +42,7 @@ flowchart TD
         TELEGRAM_API["Telegram Bot API<br/>(api.telegram.org)"]
     end
 
-    TG_USER -->|"Messages, Voice, Receipts"| TELEGRAM_API
+    TG_USER -->|"Messages, Voice, Receipts, Feedback"| TELEGRAM_API
     TG_USER -->|"MTProto Proxy Traffic"| MTPROTO
     TG_MINIAPP -->|"HTTPS GET /app, REST API /api/v1/*"| CADDY
 
@@ -68,7 +67,9 @@ The database is built on **PostgreSQL 16** with asynchronous I/O via `asyncpg` a
 erDiagram
     users ||--o{ transactions : "logs"
     users ||--o{ asset_accounts : "owns"
+    users ||--o{ credit_accounts : "incurs"
     users ||--o{ user_item_aliases : "creates"
+    users ||--o{ user_classification_feedback : "submits"
     users }o--o| family_groups : "belongs to (family_group_id)"
     users ||--o{ family_groups : "owns as founder (owner_id)"
 
@@ -78,6 +79,7 @@ erDiagram
     categories ||--o{ user_item_aliases : "maps to"
 
     asset_accounts ||--o{ transactions : "tracks capital flow"
+    credit_accounts ||--o{ transactions : "tracks repayments"
 
     transactions ||--o| transactions : "mirrors (related_transaction_id)"
 
@@ -115,6 +117,22 @@ erDiagram
         timestamp updated_at "Updated Timestamp"
     }
 
+    credit_accounts {
+        uuid id PK "Credit UUID"
+        bigint user_id FK "Borrower User ID"
+        string name "Credit Title (e.g. Автокредит)"
+        string bank_name "Bank / Creditor Name"
+        numeric original_amount "Initial Principal Liability"
+        numeric remaining_amount "Current Outstanding Principal"
+        string currency "Credit Currency (KZT, USD, etc.)"
+        numeric interest_rate "Annual Interest Rate (% APR)"
+        numeric monthly_payment "Scheduled Monthly Payment"
+        boolean is_active "Active Debt Flag"
+        timestamp closed_at "Date Fully Paid Off"
+        timestamp created_at "Created Timestamp"
+        timestamp updated_at "Updated Timestamp"
+    }
+
     categories {
         int id PK "Category ID"
         bigint user_id FK "Custom User Category (Null for System)"
@@ -135,6 +153,30 @@ erDiagram
         timestamp updated_at "Updated Timestamp"
     }
 
+    dynamic_few_shots {
+        uuid id PK "Few-Shot UUID"
+        string domain_tag "Domain (debt, transfer, food, repair, shopping, misc)"
+        string raw_query "Benchmark User Input"
+        json expected_payload "Canonical LLM Parsing Output"
+        int priority "Retrieval Weight"
+        boolean is_active "Active Flag"
+        timestamp created_at "Created Timestamp"
+        timestamp updated_at "Updated Timestamp"
+    }
+
+    user_classification_feedback {
+        uuid id PK "Feedback UUID"
+        bigint user_id FK "Actor User ID"
+        uuid transaction_id FK "Target Transaction ID"
+        text original_text "Original User Query"
+        string original_type "Pre-flip Type"
+        string corrected_type "Post-flip Type"
+        int original_category_id FK "Pre-flip Category ID"
+        int corrected_category_id FK "Post-flip Category ID"
+        timestamp created_at "Created Timestamp"
+        timestamp updated_at "Updated Timestamp"
+    }
+
     transactions {
         uuid id PK "Transaction UUID"
         bigint user_id FK "Actor User ID"
@@ -144,10 +186,11 @@ erDiagram
         numeric original_amount "Pre-Discount Base Amount"
         numeric discount_amount "Allocated Discount"
         string type "expense | income | transfer_out | transfer_in"
-        uuid asset_account_id FK "Target Asset/Deposit Account"
+        uuid asset_account_id FK "Target Asset Account"
         numeric asset_amount "Amount in Target Asset Currency"
         numeric exchange_rate "FX Conversion Rate"
         uuid related_transaction_id FK "Self-ref Mirror Transaction ID"
+        uuid credit_account_id FK "Linked Credit / Loan Account"
         string item_name "Normalized Item / Action Title"
         text raw_text "Original User Message / Audio Transcript"
         string source "text | voice | photo | manual"
@@ -159,48 +202,112 @@ erDiagram
 
 ### 2.2 Schema Design Highlights
 1. **Self-Referencing Transactions (`related_transaction_id`)**: Enables clean dual-ledger linking for intra-family transfers. When user A sends funds to partner B, two synchronized records are created and linked together with `ON DELETE SET NULL`.
-2. **Deterministic Aliasing (`user_item_aliases`)**: Implements an LRU-like local cache (`uq_user_item_alias`) for frequent items (e.g., "хлеб" -> "Продукты"). Bypasses external AI calls in 10-15 ms.
-3. **Compound Foreign Keys & Scoping**: `Category` items can be either system-wide (`user_id IS NULL`, `is_system = true`) or user-defined (`user_id = X`, `is_system = false`) with uniqueness scoped to `(user_id, name, type)`.
+2. **Dedicated Credit Management (`credit_accounts` & `credit_account_id`)**: Explicitly separates liabilities from assets. Expense transactions with `credit_account_id` record repayments, adjusting remaining debt atomically with pessimistic row-locking (`with_for_update`).
+3. **Deterministic Aliasing & Active Learning (`user_item_aliases`, `user_classification_feedback`)**: High-speed local cache for frequent items (bypasses LLM in 10-15 ms) paired with audit logs of user classification overrides (`[🔄 Это доход]` / `[🔄 Это расход]`).
+4. **Dynamic Context Few-Shots (`dynamic_few_shots`)**: Extensible repository of canonical financial interpretations injected into LLM system prompts without code re-deployment.
 
 ---
 
 ## 3. Core Architectural Sequence Diagrams
 
-### 3.1 Intra-Family Transfer & Dual-Ledger Mirroring
-Illustrates the transaction flow when a user sends funds to their partner (e.g., *"Перевел 20000 жене"*), ensuring zero combined balance change ($\Delta B_{\text{family}} = 0$) and instant partner notification.
+### 3.1 Credit Repayment via MiniApp with Pessimistic Locking
+Illustrates the atomic execution of debt reduction and ledger expense creation under pessimistic row locking (`with_for_update`).
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor UserA as "Sender (User A)"
-    participant Bot as "Telegram Bot / Webhook"
-    participant TS as "TransactionService"
+    actor User as "MiniApp Client"
+    participant API as "Credits API (/credits/{id}/repay)"
     participant DB as "PostgreSQL DB"
-    actor UserB as "Partner (User B)"
 
-    UserA->>Bot: "Перевел 20000 жене"
-    Bot->>TS: process_text(user_id=A, text)
-    TS->>TS: _detect_family_partner(UserA) -> Partner UserB
-    
-    rect rgb(240, 248, 255)
-        Note over TS,DB: Dual-Ledger Mirror Execution
-        TS->>DB: INSERT Transaction (Primary: UserA, Expense, 20000 ₸)
-        TS->>DB: INSERT Transaction (Mirror: UserB, Income, 20000 ₸)
-        TS->>DB: UPDATE Primary.related_transaction_id = Mirror.id
-        TS->>DB: UPDATE Mirror.related_transaction_id = Primary.id
-        TS->>DB: COMMIT Transaction Unit of Work
-    end
+    User->>API: POST /api/v1/credits/{credit_id}/repay {amount: 25000}
+    Note over API,DB: Begin Database Transaction
+    API->>DB: SELECT * FROM credit_accounts WHERE id = :id FOR UPDATE
+    DB-->>API: credit (remaining_amount: 100000, is_active: true)
 
-    TS-->>Bot: Return Primary Transaction & Updated Balance
-    Bot-->>UserA: "✅ Записано! Расход: 20 000 ₸ (Перевод: UserB)"
-    
-    par Async Notification to Partner
-        TS->>Bot: _notify_partner_transfer(Partner B)
-        Bot->>UserB: "💰 UserA перевел(а) вам 20 000 ₸. Баланс пополнен!"
-    end
+    API->>API: new_remaining = max(0, 100000 - 25000) = 75000
+    API->>DB: UPDATE credit_accounts SET remaining_amount = 75000
+    API->>DB: SELECT id FROM categories WHERE name = 'Погашение кредита'
+    API->>DB: INSERT INTO transactions (user_id, category_id, credit_account_id, amount=25000, type='expense')
+    API->>DB: COMMIT Transaction Unit of Work
+    DB-->>API: Success
+    API-->>User: HTTP 200 OK (Updated Credit Object)
 ```
 
-### 3.2 In-Memory Multimodal Voice Processing Pipeline
+### 3.2 Transaction Deletion & Full ACID Ledger Rollback
+Illustrates how deleting a transaction reverses all associated balances, restores liabilities, and safely removes intra-family mirror pairs.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as "User (MiniApp)"
+    participant API as "Transactions API"
+    participant TS as "TransactionService"
+    participant DB as "PostgreSQL DB"
+
+    User->>API: DELETE /api/v1/transactions/{tx_id}
+    API->>TS: delete_transaction(user_id, tx_id)
+    
+    rect rgb(255, 245, 245)
+        Note over TS,DB: ACID Ledger Rollback
+        TS->>DB: SELECT * FROM transactions WHERE id = :id FOR UPDATE
+        DB-->>TS: Transaction tx
+        
+        opt Linked to AssetAccount
+            TS->>DB: SELECT * FROM asset_accounts WHERE id = tx.asset_account_id FOR UPDATE
+            TS->>DB: Reverse asset balance adjustment (transfer_out / transfer_in / interest)
+        end
+
+        opt Linked to CreditAccount
+            TS->>DB: SELECT * FROM credit_accounts WHERE id = tx.credit_account_id FOR UPDATE
+            TS->>DB: Restore remaining_amount (remaining += tx.amount; is_active = true)
+        end
+
+        opt Has Intra-Family Mirror (related_transaction_id)
+            TS->>DB: SELECT * FROM transactions WHERE id = tx.related_transaction_id FOR UPDATE
+            TS->>DB: UPDATE Primary.related_transaction_id = NULL, Mirror.related_transaction_id = NULL
+            TS->>DB: DELETE FROM transactions WHERE id = mirror_tx.id
+        end
+
+        TS->>DB: DELETE FROM transactions WHERE id = tx.id
+        TS->>DB: COMMIT
+    end
+
+    TS-->>API: Success
+    API-->>User: HTTP 204 No Content
+```
+
+### 3.3 Dynamic Bot Feedback & Active Learning Loop
+Illustrates real-time classification healing when a user toggles transaction polarity via Telegram inline buttons.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as "Telegram User"
+    participant Bot as "Telegram Bot / Callback"
+    participant Handler as "tx_actions.py"
+    participant DB as "PostgreSQL DB"
+
+    User->>Bot: Clicks "[🔄 Это доход]"
+    Bot->>Handler: callback_query(tx_toggle:<tx_id>)
+    Handler->>DB: SELECT * FROM transactions WHERE id = :tx_id (with joinedload)
+    
+    Note over Handler: Guard check: verify no asset/credit/mirror linkage
+    Handler->>DB: Find opposite category (type: income)
+    Handler->>DB: UPDATE transactions SET type = 'income', category_id = :cat_id
+    
+    rect rgb(240, 255, 240)
+        Note over Handler,DB: Active Learning & Alias Healing
+        Handler->>DB: UPSERT user_item_aliases (normalized_name -> new_cat_id)
+        Handler->>DB: INSERT user_classification_feedback (audit trail)
+        Handler->>DB: COMMIT
+    end
+
+    Handler->>Bot: edit_message_text(Updated balance & new button "[🔄 Это расход]")
+    Bot-->>User: Message updated dynamically with toast notification
+```
+
+### 3.4 In-Memory Multimodal Voice Processing Pipeline
 Illustrates the zero-disk voice ingestion pipeline using direct streaming to Google Gemini 3.8 Flash.
 
 ```mermaid
@@ -237,40 +344,6 @@ sequenceDiagram
     Bot-->>User: "✅ Записано! (Многопозиционный чек / расход)"
 ```
 
-### 3.3 Family Onboarding & Deep-Link Joining Flow
-Illustrates the transition from a single-member state (`single_member`) to an active family state (`active_family`).
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Owner as "Family Founder (User A)"
-    participant Bot as "Telegram Bot"
-    participant FS as "FamilyService"
-    participant DB as "PostgreSQL DB"
-    actor Joiner as "Partner (User B)"
-
-    Owner->>Bot: /family or Open MiniApp
-    Bot->>FS: get_family_summary(User A)
-    FS->>DB: Query family_groups & member count
-    Note over FS: Member count == 1 -> state: single_member
-    FS-->>Bot: Return summary {status: "single_member", invite_link: "t.me/bot?start=fam_XYZ"}
-    Bot-->>Owner: Display Invite Link & Telegram Share Button
-
-    Owner->>Joiner: Shares link "https://t.me/smartbujetbot?start=fam_XYZ"
-    Joiner->>Bot: Click Deep-Link /start fam_XYZ
-    Bot->>FS: join_by_invite(User B, code="XYZ")
-    
-    rect rgb(240, 255, 240)
-        FS->>DB: Detach User B from solo group & attach to Group A
-        FS->>DB: DELETE empty solo group
-        FS->>DB: COMMIT
-    end
-
-    FS-->>Bot: Join success, partner_id = User A
-    Bot-->>Joiner: "🎉 Вы успешно присоединились к группе!"
-    Bot->>Owner: "🎉 User B присоединился(лась) к вашей семейной группе!"
-```
-
 ---
 
 ## 4. Complete REST API Endpoint Catalog (`/api/v1/*`)
@@ -286,38 +359,55 @@ All API routes require authentication via header `X-Telegram-Init-Data` validate
 ### 4.2 Transactions (`/api/v1/transactions`)
 | Method | Endpoint | Description | Request Body / Params | Response |
 | :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/transactions/` | Paginated transaction history for user or family | `include_family` (bool), `limit` (int), `offset` (int) | `List[TransactionRead]` |
-| `POST` | `/api/v1/transactions/` | Creates a manual transaction | `TransactionCreate` payload | `TransactionRead` |
+| `GET` | `/api/v1/transactions/` | Paginated transaction history with unified privacy masking | `include_family` (bool), `limit` (int), `offset` (int) | `List[TransactionRead]` |
+| `POST` | `/api/v1/transactions/` | Creates a manual transaction with business validations | `TransactionCreate` payload (`amount > 0`, `category_id`) | `TransactionRead` |
+| `PATCH`| `/api/v1/transactions/{id}` | Edits transaction amount, category, or title with ledger sync | `TransactionUpdate` payload | `TransactionRead` |
+| `DELETE`| `/api/v1/transactions/{id}`| Deletes transaction with full ACID ledger rollback | Path: `id` (UUID) | HTTP 204 No Content |
 
-### 4.3 Asset Accounts & Deposits (`/api/v1/assets`)
+### 4.3 Credits & Liabilities (`/api/v1/credits`)
+| Method | Endpoint | Description | Request Body / Params | Response |
+| :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/credits/` | Lists current user's active/all personal credit accounts | `active_only` (bool, default false) | `List[CreditAccountRead]` |
+| `GET` | `/api/v1/credits/summary` | Total liabilities, monthly commitments, and debt breakdown | None | `CreditSummaryResponse` |
+| `POST` | `/api/v1/credits/` | Creates a new personal loan/credit liability | `CreditAccountCreate` payload | `CreditAccountRead` |
+| `POST` | `/api/v1/credits/{id}/repay` | Repays debt and atomically records ledger expense | `CreditAccountRepay` (`amount > 0`) | `CreditAccountRead` |
+| `DELETE`| `/api/v1/credits/{id}` | Deletes or archives a credit account | Path: `id` (UUID) | HTTP 204 No Content |
+
+### 4.4 Analytics (`/api/v1/analytics`)
+| Method | Endpoint | Description | Request Body / Params | Response |
+| :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/analytics/report` | Financial summary and category totals for period | `period` (`week`, `month`, `year`), `include_family` (bool) | `ReportResponse` |
+| `GET` | `/api/v1/analytics/categories` | Calendar-month category spending breakdown with UI metadata | `family` (bool), `period` (`month`, `year`) | `CategoryAnalyticsResponse` |
+| `GET` | `/api/v1/analytics/monthly` | 6-month historical spending and income dynamics | `family` (bool), `months` (int, 1–24) | `MonthlyAnalyticsResponse` |
+
+### 4.5 Asset Accounts & Deposits (`/api/v1/assets`)
 | Method | Endpoint | Description | Request Body / Params | Response |
 | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v1/assets/` | Lists user's strictly personal active asset accounts | None | `List[AssetAccount]` |
-| `GET` | `/api/v1/assets/summary` | Net Worth breakdown (liquid vs locked assets in base currency) | None | `PortfolioSummary` (Total deposits, currencies, net worth) |
-| `POST` | `/api/v1/assets/` | Creates a new deposit, savings, or foreign currency account | `CreateAssetRequest` (`name`, `type`, `currency`, `balance`, `rate`) | `{"status": "ok", "asset": {...}}` |
+| `GET` | `/api/v1/assets/summary` | Net Worth breakdown (liquid vs locked assets in base currency) | None | `PortfolioSummary` |
+| `POST` | `/api/v1/assets/` | Creates a new deposit, savings, or foreign currency account | `CreateAssetRequest` payload | `{"status": "ok", "asset": {...}}` |
 | `POST` | `/api/v1/assets/{id}/deposit` | Deposits funds from liquid balance into asset account | `{"amount": float, "note": str}` | `{"status": "ok", "balance": float}` |
 | `POST` | `/api/v1/assets/{id}/withdraw` | Withdraws funds from asset account back to liquid balance | `{"amount": float, "note": str}` | `{"status": "ok", "balance": float}` |
-| `POST` | `/api/v1/assets/accrue-interest` | Triggers manual month-end interest calculation | None | `{"status": "ok", "accrued_count": int, "transactions": [...]}` |
+| `POST` | `/api/v1/assets/accrue-interest` | Triggers manual month-end interest calculation | None | `{"status": "ok", "accrued_count": int}` |
 
-### 4.4 Family Group Management (`/api/v1/family`)
+### 4.6 Family Group Management (`/api/v1/family`)
 | Method | Endpoint | Description | Request Body / Params | Response |
 | :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/family/summary` | Consolidated family balances with intercompany elimination | None | `FamilySummaryResponse` (state, combined metrics, members) |
+| `GET` | `/api/v1/family/summary` | Consolidated family balances with intercompany elimination | None | `FamilySummaryResponse` |
 | `GET` | `/api/v1/family/transactions` | Joint feed of family transactions with privacy masking | `limit` (int, default 60), `offset` (int) | `List[FamilyTransactionItem]` |
 | `POST` | `/api/v1/family/join` | Joins a family group via invite code | `{"invite_code": "string"}` | `{"success": true, "group_name": "string"}` |
 | `POST` | `/api/v1/family/leave` | Leaves current family group and notifies partner | None | `{"success": true}` |
 
-### 4.5 Categories & Analytics (`/api/v1/categories`, `/api/v1/analytics`)
+### 4.7 Categories (`/api/v1/categories`)
 | Method | Endpoint | Description | Request Body / Params | Response |
 | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v1/categories/` | Lists system and user categories | `type` (`income` \| `expense` \| `transfer_out` \| `transfer_in`) | `List[CategoryRead]` |
 | `POST` | `/api/v1/categories/` | Creates a custom user category | `CategoryCreate` payload | `CategoryRead` |
-| `GET` | `/api/v1/analytics/report` | Financial summary and category breakdown | `period` (`week` \| `month` \| `year`), `include_family` (bool) | `ReportResponse` |
 
-### 4.6 Webhook (`/api/v1/webhook`)
+### 4.8 Webhook (`/api/v1/webhook`)
 | Method | Endpoint | Description | Request Body / Params | Response |
 | :--- | :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/webhook` | Telegram Bot API Webhook Ingress | Header: `X-Telegram-Bot-Api-Secret-Token` | `{"status": "ok"}` |
+| `POST` | `/api/v1/webhook` | Telegram Bot API Webhook Ingress (constant-time validation) | Header: `X-Telegram-Bot-Api-Secret-Token` | `{"status": "ok"}` |
 
 ---
 
@@ -325,46 +415,96 @@ All API routes require authentication via header `X-Telegram-Init-Data` validate
 
 ```
 src/services/
-├── ai_service.py           # Gemini 3.8 Flash multimodal integration
-├── asset_service.py        # Personal asset accounts & monthly compound interest
-├── category_service.py     # System seeding & custom category management
-├── discount_service.py     # Largest Remainder Method (Hamilton Algorithm)
-├── family_service.py       # Family state management & privacy masking
-├── parser_service.py       # Regex parsing & normalized casing heuristics
-├── report_service.py       # Financial aggregation & category breakdown
-└── transaction_service.py  # Central transaction orchestrator & mirror transfers
+├── ai_service.py              # Gemini 3.8 Flash multimodal parsing & restaurant aggregation
+├── asset_service.py           # Personal assets & monthly compound interest accrual
+├── category_service.py        # System seeding & custom category taxonomy
+├── credit_service.py          # Credit lifecycle, debt summary & heuristic resolution
+├── discount_service.py        # Hamilton Largest Remainder discount distribution
+├── dynamic_context_service.py # Few-shot retrieval, prompt injection & alias sanitization
+├── family_service.py          # Family state, onboarding deep links & intercompany elimination
+├── parser_service.py          # Heuristic regex parsing
+├── report_service.py          # Donut & Bar chart analytics aggregations
+└── transaction_service.py     # Central orchestrator, CRUD lifecycle, ACID rollback & privacy masking
 ```
 
-### 5.1 Financial Invariants & Business Logic
+### 5.1 Financial Invariants & Integrity Rules
 
 #### Invariant 1: Intra-Family Mirror Preservation ($\Delta B_{\text{family}} \equiv 0$)
 When User A records an expense transfer to their family partner B:
 $$\Delta B_A = -X, \quad \Delta B_B = +X \implies \Delta B_{\text{family}} = \Delta B_A + \Delta B_B = 0$$
-The family combined balance remains strictly constant.
+Toggling transaction type on linked transactions is strictly prohibited by security guards in `tx_actions.py`.
 
-#### Invariant 2: Intercompany Elimination in Consolidated Family Cash Flow
-Intra-family transfers do not represent external household expenses or revenues. The family summary excludes transactions where `related_transaction_id IS NOT NULL`:
-$$E_{\text{consolidated}} = \sum_{m \in \text{members}} E_m - \sum \text{IntraFamilyTransfers}$$
-$$I_{\text{consolidated}} = \sum_{m \in \text{members}} I_m - \sum \text{IntraFamilyTransfers}$$
+#### Invariant 2: Intercompany Cashflow Elimination
+Intra-family transfers are excluded from external family revenues and expenditures. Consolidated monthly income accounts only for external inflows:
+$$E_{\text{consolidated}} = \max\left(0, \sum E_m - \text{IntraTransfers}\right), \quad I_{\text{consolidated}} = \max\left(0, \sum I_{\text{external}}\right)$$
 
-#### Invariant 3: Deterministic Discount Distribution (Largest Remainder Method)
-Given line items $A_1, A_2, \dots, A_n$ and total discount $D$, each item receives an exact discount $d_i = D \times \frac{A_i}{\sum A_k}$. Unallocated cents $C = \left(D - \sum \lfloor d_i \rfloor\right) \times 100$ are distributed one cent at a time to items with the largest fractional remainders $r_i = d_i - \lfloor d_i \rfloor$. This guarantees:
-$$\sum_{i=1}^n (A_i - d_i^*) = \sum A_i - D = \text{total\_paid}$$
+#### Invariant 3: Credit Repayment Atomicity
+A credit repayment must simultaneously decrease the outstanding liability and record an equal cash expense in the ledger within a single database transaction boundary:
+$$\Delta L_{\text{credit}} = -X, \quad \Delta B_{\text{liquid}} = -X$$
 
-#### Invariant 4: Monthly Interest Compound Accrual Idempotency
-Monthly interest on deposit accounts is calculated as:
-$$I_{\text{month}} = \left\lfloor \text{balance} \times \frac{\text{interest\_rate}}{100 \times 12} \times 100 + 0.5 \right\rfloor \div 100$$
-The execution engine checks for an existing transaction matching `(asset_account_id, category_id, start_of_month <= tx_date < end_of_month)` before applying the accrual, guaranteeing zero duplicate accruals even across arbitrary scheduler restarts.
+#### Invariant 4: Transaction Deletion Balance Conservation
+Deleting a transaction strictly reverses its financial effects:
+- **Deposit Top-up**: Asset balance decreases by $X$.
+- **Deposit Withdrawal**: Asset balance increases by $X$.
+- **Credit Repayment**: Credit outstanding liability increases by $X$; closed credit reopens.
+- **Credit Incurrence**: Allowed only if zero repayments exist; deletes credit account.
+- **Intra-Family Transfer**: Mirror transaction is deleted atomically without circular foreign key errors.
 
-#### Invariant 5: Personal Isolation & Privacy Masking
-1. **Asset Isolation**: `AssetService.get_user_assets()` filters strictly by `user_id`. No user can inspect or operate on another user's deposit or currency balances.
-2. **Feed Masking**: In shared family feeds (`FamilyService.get_family_transactions()`), any operation touching an `asset_account_id` or matching deposit keywords is renamed to `"Пополнение депозита"`, `"Снятие с депозита"`, or `"Проценты по вкладу"`, and `raw_text` is set to `None` to prevent leaking private purchase memos or voice prompts.
+#### Invariant 5: Universal Privacy Masking
+In all responses exposing family transactions, asset account operations are sanitized to `"Пополнение депозита"`, `"Снятие с депозита"`, or `"Проценты по вкладу"`, and `raw_text` is suppressed (`null`) for non-owners.
 
 ---
 
-## 6. Deployment & DevOps Architecture
+## 6. MiniApp Navigation & Client Architecture
 
-### 6.1 Container Topology & Port Isolation
+```mermaid
+graph TD
+    subgraph MiniAppRoot ["MiniApp SPA Navigation Hierarchy"]
+        TOP["Top Bar: Greeting, Currency Badge, Theme Detection"]
+        NAV["Bottom Navigation Bar (Fixed)"]
+
+        TAB_OPS["[🧾 Операции]"]
+        TAB_ASSETS["[🏦 Депозиты]"]
+        TAB_CREDITS["[💳 Кредиты]"]
+        TAB_ANALYTICS["[📊 Аналитика]"]
+
+        TOGGLE_OPS["Segmented Switch: [👤 Личные] / [👨‍👩‍👧‍👦 Семья]"]
+        VIEW_PERSONAL["Personal History Feed<br/>• Balance Card<br/>• Month Summary<br/>• Transaction Click -> Edit Modal"]
+        VIEW_FAMILY["Family Budget View<br/>• Single Member: Invite & Deep Link<br/>• Active Family: Combined Balances & Feed"]
+
+        MODAL_EDIT["Modal: Edit Transaction<br/>• Amount input<br/>• Category Picker Trigger<br/>• Delete Action Button"]
+        SHEET_CAT["Bottom Sheet: Category Picker<br/>• Real-time filter search<br/>• Single-column touch-friendly list"]
+
+        MODAL_CREDIT["Modal: Repay Credit<br/>• Amount input<br/>• Atomic ledger expense"]
+
+        CHART_DONUT["SVG Donut Chart<br/>• Dynamic stroke offset<br/>• Category spend breakdown"]
+        CHART_BAR["SVG Bar Chart<br/>• 6-month expenditure dynamics<br/>• Linear gradient bars"]
+    end
+
+    TOP --> NAV
+    NAV --> TAB_OPS
+    NAV --> TAB_ASSETS
+    NAV --> TAB_CREDITS
+    NAV --> TAB_ANALYTICS
+
+    TAB_OPS --> TOGGLE_OPS
+    TOGGLE_OPS --> VIEW_PERSONAL
+    TOGGLE_OPS --> VIEW_FAMILY
+
+    VIEW_PERSONAL --> MODAL_EDIT
+    MODAL_EDIT --> SHEET_CAT
+
+    TAB_CREDITS --> MODAL_CREDIT
+
+    TAB_ANALYTICS --> CHART_DONUT
+    TAB_ANALYTICS --> CHART_BAR
+```
+
+---
+
+## 7. Deployment & DevOps Architecture
+
+### 7.1 Container Topology & Port Isolation
 
 | Container | Image | Host Port | Internal Port | Memory Limit | CPU Limit | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -376,40 +516,24 @@ The execution engine checks for an existing transaction matching `(asset_account
 > [!IMPORTANT]
 > **MTProto Port 443 Isolation Guard**: The host runs an active MTProto proxy on standard port `443`. To prevent port collision, `smart_bujet_caddy` is mapped to **`8443:443`** for HTTPS/Webhook traffic and **`80:80`** for HTTP. Port 443 on the host remains completely untouched and dedicated to MTProto.
 
-### 6.2 Caddyfile Ingress Routing
-```caddy
-{
-    http_port 80
-    https_port 443
-}
-
-85.198.89.188.sslip.io {
-    reverse_proxy backend:8000
-}
-
-:80 {
-    reverse_proxy backend:8000
-}
-
-:443 {
-    tls internal
-    reverse_proxy backend:8000
-}
-```
-
-### 6.3 GitHub Actions CI/CD Pipeline
-Continuous deployment is configured in `.github/workflows/deploy.yml`:
-1. **Lint & Syntax Verification**: Triggers on push to `main`, compiling all Python code with `python -m py_compile`.
-2. **Automated SSH Deployment**: Connects to `85.198.89.188` via SSH ed25519 key, pulls latest Git revisions, builds Docker images, and executes `docker compose up -d --build` followed by image pruning.
+### 7.2 Security Hardening Checklist
+- [x] **MTProto Isolation**: Host port 443 remains dedicated to MTProto; Caddy binds to 8443.
+- [x] **Build Protection**: Root `.dockerignore` prevents accidental packaging of `.env*` or `.git`.
+- [x] **Webhook Validation**: Constant-time `secrets.compare_digest()` with non-empty secret enforcement.
+- [x] **Database Roles**: `init_db_roles.sql` enforces dynamic password provisioning.
+- [x] **XSS Mitigation**: Contextual HTML escaping (`escapeHtml`) across all client rendering paths.
+- [x] **Data Isolation**: Strict user-level scoping on asset and credit entities.
+- [x] **Pessimistic Locking**: `select(...).with_for_update()` applied on concurrent financial operations.
 
 ---
 
-## 7. Developer Handover & Operational Runbook
+## 8. Developer Handover & Operational Runbook
 
-### 7.1 Project Directory Structure
+### 8.1 Project Directory Structure
 ```
 C:\Users\aanto\smart-bujet\
 ├── .github/workflows/deploy.yml  # CI/CD deployment pipeline
+├── .dockerignore                 # Excludes .env*, .git, and cache from Docker builds
 ├── Caddyfile                     # Caddy reverse proxy routing rules
 ├── Dockerfile                    # Multistage Python 3.12-slim build
 ├── docker-compose.yml            # Container definitions & resource limits
@@ -433,7 +557,7 @@ C:\Users\aanto\smart-bujet\
     └── static/                   # Telegram MiniApp SPA (HTML, CSS, JS)
 ```
 
-### 7.2 Execution & Development Commands
+### 8.2 Execution & Development Commands
 
 #### Local Environment Setup
 ```bash
@@ -480,4 +604,4 @@ docker compose logs -f caddy
 
 ---
 
-*Architectural Blueprint approved and certified for GitHub repository documentation.*
+*Architectural Blueprint v2.5.0 approved and certified for GitHub repository documentation.*
