@@ -16,7 +16,7 @@ class ParserService:
         return cleaned[0].upper() + cleaned[1:]
 
     @staticmethod
-    def parse_text(text: str) -> Optional[tuple[Decimal, str]]:
+    def parse_text(text: str) -> tuple[Decimal, str] | None:
         """
         Fast regex-based extraction of amount and item name from user message.
         Examples:
@@ -31,8 +31,14 @@ class ParserService:
         if re.search(r"(?:скидк|дисконт|акци|-%|off)", text, re.IGNORECASE):
             return None
 
-        # If text mentions income, transfer, deposit or currency keywords, bypass regex to let AI classify
-        if re.search(r"(?:зарплат|доход|аванс|преми|подар|пополн|перевод|перевел|перевела|скинул|скинула|отправил|депозит|вклад|копилк|валют|доллар|\$|евро|€|брокер)", text, re.IGNORECASE):
+        # If text mentions income, return of debt, transfer, deposit or currency keywords, bypass regex to let AI classify
+        if re.search(
+            r"(?:зарплат|доход|аванс|преми|подар|пополн|перевод|перевел|перевела|скинул|скинула|отправил|"
+            r"вернул|вернула|вернули|возврат|отдал|отдала|отдали|долг|получ|получил|получила|"
+            r"пришл|пришли|пришел|депозит|вклад|копилк|валют|доллар|\$|евро|€|брокер)",
+            text,
+            re.IGNORECASE,
+        ):
             return None
 
         # If multiple numbers exist, bypass single-item regex to let AI process multi-item batch

@@ -32,6 +32,7 @@ class ReportService:
                 Transaction.user_id == user_id,
                 Transaction.family_group_id == family_group_id
             ))
+            conditions.append(Transaction.related_transaction_id.is_(None))
         else:
             conditions.append(Transaction.user_id == user_id)
 
