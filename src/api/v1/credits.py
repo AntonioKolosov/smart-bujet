@@ -5,8 +5,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.database import get_db
-from src.core.security import get_current_user
+from src.api.deps import get_current_user, get_db
 from src.models.user import User
 from src.schemas.credit import CreditAccountCreate, CreditAccountRepay, CreditAccountRead, CreditSummaryResponse
 from src.services.credit_service import CreditService
