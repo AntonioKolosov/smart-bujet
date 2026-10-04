@@ -4,7 +4,7 @@ from aiogram import Router, F, Bot
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.services.transaction_service import TransactionService
-from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError
+from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError, OffTopicMessageError
 from src.models.user import User
 from src.bot.messages import BotMessages
 
@@ -50,6 +50,8 @@ async def process_photo_transaction(message: Message, session: AsyncSession, bot
                 current_balance=bal_data["current_balance"]
             )
         )
+    except OffTopicMessageError:
+        await message.reply(BotMessages.off_topic_warning("photo"))
     except (InvalidTransactionAmountError, TransactionParseError):
         await message.reply(BotMessages.photo_clarification())
     except Exception as exc:

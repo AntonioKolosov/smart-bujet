@@ -17,3 +17,7 @@ class TransactionParseError(BaseSmartBujetError):
 
 class InvalidTransactionAmountError(TransactionParseError):
     pass
+
+class OffTopicMessageError(TransactionParseError):
+    pass
+

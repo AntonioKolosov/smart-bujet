@@ -13,7 +13,7 @@ from src.models.category import Category, CategoryType
 from src.models.transaction import Transaction, TransactionSource
 from src.models.alias import UserItemAlias
 from src.models.asset import AssetAccount, AssetType
-from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError
+from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError, OffTopicMessageError
 from src.services.parser_service import ParserService
 from src.services.category_service import CategoryService
 from src.services.asset_service import AssetService
@@ -325,6 +325,8 @@ class TransactionService:
                 for a in accessible_assets
             ]
             payload = await self.ai_service.classify_text(text, cat_names, assets_context=assets_context)
+            if payload.get("is_financial") is False:
+                raise OffTopicMessageError("Сообщение не относится к финансовым операциям", raw_text=text)
             raw_items = payload.get("items", [])
             discount_percent = payload.get("discount_percent")
             discount_amount = payload.get("discount_amount")
@@ -449,6 +451,8 @@ class TransactionService:
         ]
 
         payload = await self.ai_service.parse_voice(audio_bytes, mime_type, cat_names, assets_context=assets_context)
+        if payload.get("is_financial") is False:
+            raise OffTopicMessageError("Голосовое сообщение не содержит финансовых операций", raw_text=None)
         raw_items = payload.get("items", [])
         if not raw_items:
             raise TransactionParseError("Could not parse voice transaction")
@@ -562,6 +566,8 @@ class TransactionService:
         cat_names = list({c.name for c in available_cats})
 
         payload = await self.ai_service.parse_receipt_photo(image_bytes, mime_type, cat_names)
+        if payload.get("is_financial") is False:
+            raise OffTopicMessageError("На фотографии не обнаружен кассовый чек", raw_text=None)
         raw_items = payload.get("items", [])
         if not raw_items:
             raise TransactionParseError("Could not parse receipt photo")
