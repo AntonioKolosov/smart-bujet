@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import uuid
 from sqlalchemy import BigInteger, String, Integer, Boolean, Text, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
