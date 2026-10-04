@@ -245,7 +245,7 @@
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
-    return `${formatted} ${sym}`;
+    return `${formatted}\u00A0${sym}`;
   }
 
   function formatDateGroup(isoDate) {
@@ -1068,13 +1068,26 @@
     categorySheetList.innerHTML = '';
     const selectedId = Number(editTxCategoryValue?.value);
 
+    if (!categories || categories.length === 0) {
+      categorySheetList.innerHTML = `
+        <div class="sheet-empty-state">
+          <span class="sheet-empty-icon">🔍</span>
+          <span class="sheet-empty-text">Категории не найдены</span>
+        </div>
+      `;
+      return;
+    }
+
     categories.forEach(cat => {
       const meta = getCategoryMeta(cat.name);
       const isSelected = cat.id === selectedId;
       const item = document.createElement('div');
       item.className = `category-sheet-item ${isSelected ? 'selected' : ''}`;
+      const iconBg = meta.color ? `${meta.color}22` : 'rgba(255, 255, 255, 0.06)';
       item.innerHTML = `
-        <span class="sheet-item-icon">${meta.icon}</span>
+        <div class="sheet-item-icon-wrap" style="background: ${iconBg};">
+          <span class="sheet-item-icon">${meta.icon}</span>
+        </div>
         <span class="sheet-item-name">${escapeHtml(cat.name)}</span>
         ${isSelected ? '<span class="sheet-item-check">✓</span>' : ''}
       `;
@@ -1515,7 +1528,10 @@
       }
       if (analyticsTopCategoryEl) {
         if (metrics.top_category_name && Number(metrics.top_category_amount) > 0) {
-          analyticsTopCategoryEl.textContent = `${metrics.top_category_name} (${formatMoney(metrics.top_category_amount)})`;
+          analyticsTopCategoryEl.innerHTML = `
+            <span class="metric-cat-name">${escapeHtml(metrics.top_category_name)}</span>
+            <span class="metric-cat-amt">${formatMoney(metrics.top_category_amount)}</span>
+          `;
         } else {
           analyticsTopCategoryEl.textContent = '—';
         }
