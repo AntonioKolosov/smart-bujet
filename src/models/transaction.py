@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Numeric, String, Text, BigInteger, ForeignKey, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -47,10 +47,10 @@ class Transaction(Base, TimestampMixin):
     transaction_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
 
     user: Mapped["User"] = relationship("User", back_populates="transactions")
-    family_group: Mapped["FamilyGroup" | None] = relationship("FamilyGroup", back_populates="transactions")
+    family_group: Mapped[Optional["FamilyGroup"]] = relationship("FamilyGroup", back_populates="transactions")
     category: Mapped["Category"] = relationship("Category", back_populates="transactions")
-    asset_account: Mapped["AssetAccount" | None] = relationship("AssetAccount", back_populates="transactions")
-    related_transaction: Mapped["Transaction" | None] = relationship("Transaction", remote_side="Transaction.id", foreign_keys=[related_transaction_id], post_update=True)
+    asset_account: Mapped[Optional["AssetAccount"]] = relationship("AssetAccount", back_populates="transactions")
+    related_transaction: Mapped[Optional["Transaction"]] = relationship("Transaction", remote_side="Transaction.id", foreign_keys=[related_transaction_id], post_update=True)
 
     @property
     def category_name(self) -> str | None:
