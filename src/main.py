@@ -71,6 +71,7 @@ async def lifespan(app: FastAPI):
                 BotCommand(command="miniapp", description="Открыть журнал транзакций"),
                 BotCommand(command="deposits", description="Депозиты и сбережения"),
                 BotCommand(command="credits", description="Кредиты и займы"),
+                BotCommand(command="analytics", description="Аналитика и графики"),
                 BotCommand(command="family", description="Семейный бюджет"),
                 BotCommand(command="start", description="Перезапустить бота"),
             ])

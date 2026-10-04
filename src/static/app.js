@@ -50,11 +50,34 @@
   const navOpsBtn = document.getElementById('navOpsBtn');
   const navAssetsBtn = document.getElementById('navAssetsBtn');
   const navCreditsBtn = document.getElementById('navCreditsBtn');
-  const navFamilyBtn = document.getElementById('navFamilyBtn');
+  const navAnalyticsBtn = document.getElementById('navAnalyticsBtn');
   const tabOps = document.getElementById('tab-operations');
   const tabAssets = document.getElementById('tab-assets');
   const tabCredits = document.getElementById('tab-credits');
-  const tabFamily = document.getElementById('tab-family');
+  const tabAnalytics = document.getElementById('tab-analytics');
+
+  // Operations Mode Switcher Elements
+  const btnOpsPersonal = document.getElementById('btnOpsPersonal');
+  const btnOpsFamily = document.getElementById('btnOpsFamily');
+  const opsPersonalView = document.getElementById('opsPersonalView');
+  const opsFamilyView = document.getElementById('opsFamilyView');
+
+  // Analytics Tab Elements
+  const btnAnalyticsPersonal = document.getElementById('btnAnalyticsPersonal');
+  const btnAnalyticsFamily = document.getElementById('btnAnalyticsFamily');
+  const analyticsLoaderEl = document.getElementById('analyticsLoader');
+  const analyticsErrorEl = document.getElementById('analyticsError');
+  const analyticsContentEl = document.getElementById('analyticsContent');
+  const analyticsMonthSpendEl = document.getElementById('analyticsMonthSpend');
+  const analyticsAvgSpendEl = document.getElementById('analyticsAvgSpend');
+  const analyticsTopCategoryEl = document.getElementById('analyticsTopCategory');
+  const analyticsCategoryPeriodEl = document.getElementById('analyticsCategoryPeriod');
+  const donutChartContainer = document.getElementById('donutChartContainer');
+  const categoryLegendList = document.getElementById('categoryLegendList');
+  const barChartContainer = document.getElementById('barChartContainer');
+
+  let currentOpsMode = 'personal';
+  let currentAnalyticsMode = 'personal';
 
   // DOM Elements - Family Tab
   const familyLoaderEl = document.getElementById('familyLoader');
@@ -179,15 +202,15 @@
     });
   }
 
-  // --- Tab Navigation ---
+  // --- Tab Navigation & Mode Switchers ---
   function switchTab(tabId) {
-    [tabOps, tabAssets, tabCredits, tabFamily].forEach(t => t && t.classList.remove('active'));
-    [navOpsBtn, navAssetsBtn, navCreditsBtn, navFamilyBtn].forEach(b => b && b.classList.remove('active'));
+    [tabOps, tabAssets, tabCredits, tabAnalytics].forEach(t => t && t.classList.remove('active'));
+    [navOpsBtn, navAssetsBtn, navCreditsBtn, navAnalyticsBtn].forEach(b => b && b.classList.remove('active'));
 
-    if (tabId === 'tab-family') {
-      if (tabFamily) tabFamily.classList.add('active');
-      if (navFamilyBtn) navFamilyBtn.classList.add('active');
-      fetchFamilySummary();
+    if (tabId === 'tab-analytics') {
+      if (tabAnalytics) tabAnalytics.classList.add('active');
+      if (navAnalyticsBtn) navAnalyticsBtn.classList.add('active');
+      fetchAnalytics(currentAnalyticsMode === 'family');
     } else if (tabId === 'tab-assets') {
       if (tabAssets) tabAssets.classList.add('active');
       if (navAssetsBtn) navAssetsBtn.classList.add('active');
@@ -199,14 +222,53 @@
     } else {
       if (tabOps) tabOps.classList.add('active');
       if (navOpsBtn) navOpsBtn.classList.add('active');
+      if (currentOpsMode === 'family') {
+        fetchFamilySummary();
+      } else {
+        fetchTransactions();
+      }
+    }
+  }
+
+  function switchOpsMode(mode) {
+    currentOpsMode = mode;
+    if (mode === 'family') {
+      btnOpsPersonal?.classList.remove('active');
+      btnOpsFamily?.classList.add('active');
+      opsPersonalView?.classList.add('hidden');
+      opsFamilyView?.classList.remove('hidden');
+      fetchFamilySummary();
+    } else {
+      btnOpsFamily?.classList.remove('active');
+      btnOpsPersonal?.classList.add('active');
+      opsFamilyView?.classList.add('hidden');
+      opsPersonalView?.classList.remove('hidden');
       fetchTransactions();
     }
   }
 
+  function switchAnalyticsMode(mode) {
+    currentAnalyticsMode = mode;
+    if (mode === 'family') {
+      btnAnalyticsPersonal?.classList.remove('active');
+      btnAnalyticsFamily?.classList.add('active');
+      fetchAnalytics(true);
+    } else {
+      btnAnalyticsFamily?.classList.remove('active');
+      btnAnalyticsPersonal?.classList.add('active');
+      fetchAnalytics(false);
+    }
+  }
+
+  if (btnOpsPersonal) btnOpsPersonal.addEventListener('click', () => switchOpsMode('personal'));
+  if (btnOpsFamily) btnOpsFamily.addEventListener('click', () => switchOpsMode('family'));
+  if (btnAnalyticsPersonal) btnAnalyticsPersonal.addEventListener('click', () => switchAnalyticsMode('personal'));
+  if (btnAnalyticsFamily) btnAnalyticsFamily.addEventListener('click', () => switchAnalyticsMode('family'));
+
   if (navOpsBtn) navOpsBtn.addEventListener('click', () => switchTab('tab-operations'));
   if (navAssetsBtn) navAssetsBtn.addEventListener('click', () => switchTab('tab-assets'));
   if (navCreditsBtn) navCreditsBtn.addEventListener('click', () => switchTab('tab-credits'));
-  if (navFamilyBtn) navFamilyBtn.addEventListener('click', () => switchTab('tab-family'));
+  if (navAnalyticsBtn) navAnalyticsBtn.addEventListener('click', () => switchTab('tab-analytics'));
 
   // --- Data Fetching ---
   async function fetchProfile() {
@@ -1032,14 +1094,209 @@
     });
   }
 
+  // --- Analytics Domain ---
+  function formatCompact(num) {
+    const val = Number(num) || 0;
+    if (val >= 1000000) return (val / 1000000).toFixed(1).replace('.0', '') + 'M';
+    if (val >= 1000) return Math.round(val / 1000) + 'k';
+    return Math.round(val).toString();
+  }
+
+  async function fetchAnalytics(isFamily = false) {
+    if (!tabAnalytics) return;
+    analyticsLoaderEl?.classList.remove('hidden');
+    analyticsErrorEl?.classList.add('hidden');
+    analyticsContentEl?.classList.add('hidden');
+
+    try {
+      const familyParam = isFamily ? 'true' : 'false';
+      const [catRes, monthRes] = await Promise.all([
+        fetch(`/api/v1/analytics/categories?family=${familyParam}&period=month`, { headers: getHeaders() }),
+        fetch(`/api/v1/analytics/monthly?family=${familyParam}&months=6`, { headers: getHeaders() })
+      ]);
+
+      if (!catRes.ok || !monthRes.ok) {
+        throw new Error('Не удалось загрузить данные аналитики');
+      }
+
+      const catData = await catRes.json();
+      const monthData = await monthRes.json();
+
+      // Key Metrics
+      const metrics = monthData.metrics || {};
+      if (analyticsMonthSpendEl) {
+        analyticsMonthSpendEl.textContent = formatMoney(metrics.current_month_spend || 0);
+      }
+      if (analyticsAvgSpendEl) {
+        analyticsAvgSpendEl.textContent = formatMoney(metrics.monthly_average_spend || 0);
+      }
+      if (analyticsTopCategoryEl) {
+        if (metrics.top_category_name && Number(metrics.top_category_amount) > 0) {
+          analyticsTopCategoryEl.textContent = `${metrics.top_category_name} (${formatMoney(metrics.top_category_amount)})`;
+        } else {
+          analyticsTopCategoryEl.textContent = '—';
+        }
+      }
+
+      if (analyticsCategoryPeriodEl && catData.period_label) {
+        analyticsCategoryPeriodEl.textContent = catData.period_label;
+      }
+
+      // Charts
+      renderDonutChart(catData.categories || [], catData.total_spend || 0);
+      renderBarChart(monthData.history || []);
+
+      analyticsContentEl?.classList.remove('hidden');
+    } catch (err) {
+      if (analyticsErrorEl) {
+        analyticsErrorEl.textContent = err.message || 'Ошибка загрузки аналитики';
+        analyticsErrorEl.classList.remove('hidden');
+      }
+    } finally {
+      analyticsLoaderEl?.classList.add('hidden');
+    }
+  }
+
+  function renderDonutChart(categories, totalSpend) {
+    if (!donutChartContainer || !categoryLegendList) return;
+
+    if (!categories || categories.length === 0 || Number(totalSpend) <= 0) {
+      donutChartContainer.innerHTML = `
+        <div class="empty-banner" style="padding: 24px 0;">
+          <div class="empty-icon">📊</div>
+          <p class="empty-title">Нет расходов за месяц</p>
+          <span class="empty-desc">В этом месяце трат пока не зафиксировано</span>
+        </div>`;
+      categoryLegendList.innerHTML = '';
+      return;
+    }
+
+    const radius = 68;
+    const strokeWidth = 22;
+    const circumference = 2 * Math.PI * radius; // ~427.2566
+    let accumulatedOffset = 0;
+    const hasMultiple = categories.length > 1;
+
+    let circlesSvg = `
+      <circle cx="100" cy="100" r="${radius}" fill="transparent" stroke="rgba(255, 255, 255, 0.05)" stroke-width="${strokeWidth}" />
+    `;
+
+    categories.forEach(cat => {
+      const pct = Math.max(0, Number(cat.percentage) || 0);
+      const rawDash = (pct / 100) * circumference;
+      const dash = hasMultiple ? Math.max(0.5, rawDash - 1.5) : rawDash;
+      const offset = accumulatedOffset;
+
+      circlesSvg += `
+        <circle cx="100" cy="100" r="${radius}"
+          fill="transparent"
+          stroke="${cat.color || '#38bdf8'}"
+          stroke-width="${strokeWidth}"
+          stroke-dasharray="${dash} ${circumference - dash}"
+          stroke-dashoffset="${-offset}"
+          stroke-linecap="butt" />
+      `;
+      accumulatedOffset += rawDash;
+    });
+
+    donutChartContainer.innerHTML = `
+      <svg width="200" height="200" viewBox="0 0 200 200" style="transform: rotate(-90deg); transform-origin: 50% 50%;">
+        ${circlesSvg}
+      </svg>
+      <div class="donut-center-text">
+        <span class="donut-center-total">${formatMoney(totalSpend)}</span>
+        <span class="donut-center-sub">Всего трат</span>
+      </div>
+    `;
+
+    categoryLegendList.innerHTML = categories.map(cat => `
+      <div class="legend-item">
+        <div class="legend-left">
+          <span class="legend-color-dot" style="background: ${cat.color};"></span>
+          <span class="legend-icon">${cat.icon || '🏷'}</span>
+          <span class="legend-name">${escapeHtml(cat.name)}</span>
+        </div>
+        <div class="legend-right">
+          <span class="legend-amount">${formatMoney(cat.amount)}</span>
+          <span class="legend-pct">${(Number(cat.percentage) || 0).toFixed(1)}%</span>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function renderBarChart(history) {
+    if (!barChartContainer) return;
+    if (!history || history.length === 0) {
+      barChartContainer.innerHTML = `
+        <div class="empty-banner" style="padding: 24px 0;">
+          <p class="empty-title">Нет истории трат</p>
+          <span class="empty-desc">Данные появятся по мере накопления расходов</span>
+        </div>`;
+      return;
+    }
+
+    const svgWidth = 330;
+    const svgHeight = 160;
+    const padTop = 26;
+    const padBottom = 28;
+    const padX = 10;
+    const availWidth = svgWidth - padX * 2;
+    const availHeight = svgHeight - padTop - padBottom;
+
+    const maxExp = Math.max(...history.map(h => Number(h.total_expense) || 0), 100);
+    const count = history.length;
+    const slotWidth = availWidth / count;
+    const barWidth = Math.min(30, Math.max(16, slotWidth * 0.6));
+
+    let barsSvg = '';
+    history.forEach((item, idx) => {
+      const exp = Number(item.total_expense) || 0;
+      const barHeight = Math.max(exp > 0 ? 4 : 0, Math.round((exp / maxExp) * availHeight));
+      const x = padX + idx * slotWidth + (slotWidth - barWidth) / 2;
+      const y = svgHeight - padBottom - barHeight;
+
+      const label = item.label || `${item.month}`;
+      const amountText = exp > 0 ? formatCompact(exp) : '0';
+
+      barsSvg += `
+        <g class="bar-group">
+          ${exp > 0 ? `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="4" fill="url(#barGradient)" opacity="0.9" />` : `<rect x="${x}" y="${svgHeight - padBottom - 2}" width="${barWidth}" height="2" rx="1" fill="rgba(255,255,255,0.15)" />`}
+          <text x="${x + barWidth / 2}" y="${y - 6}" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="700">${amountText}</text>
+          <text x="${x + barWidth / 2}" y="${svgHeight - 10}" text-anchor="middle" fill="#94a3b8" font-size="11" font-weight="500">${label}</text>
+        </g>
+      `;
+    });
+
+    const baselineY = svgHeight - padBottom;
+    barChartContainer.innerHTML = `
+      <svg width="100%" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="barGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#38bdf8" />
+            <stop offset="100%" stop-color="#0284c7" />
+          </linearGradient>
+        </defs>
+        <line x1="${padX}" y1="${baselineY}" x2="${svgWidth - padX}" y2="${baselineY}" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+        ${barsSvg}
+      </svg>
+    `;
+  }
+
   refreshBtn.addEventListener('click', () => {
     fetchProfile();
-    fetchTransactions();
+    if (currentOpsMode === 'family') {
+      fetchFamilySummary();
+    } else {
+      fetchTransactions();
+    }
     fetchAssets();
     fetchCredits();
+    if (tabAnalytics && tabAnalytics.classList.contains('active')) {
+      fetchAnalytics(currentAnalyticsMode === 'family');
+    }
   });
 
-  // Check URL params for deep linking (e.g. ?page=deposits, ?page=family, ?page=credits)
+  // Check URL params for deep linking (e.g. ?page=deposits, ?page=family, ?page=credits, ?page=analytics)
   const urlParams = new URLSearchParams(window.location.search);
   const initialPage = (urlParams.get('page') || window.location.hash.replace('#', '') || '').toLowerCase();
 
@@ -1048,7 +1305,10 @@
   } else if (initialPage === 'credits' || initialPage === 'loans') {
     switchTab('tab-credits');
   } else if (initialPage === 'family' || initialPage === 'fam') {
-    switchTab('tab-family');
+    switchTab('tab-operations');
+    switchOpsMode('family');
+  } else if (initialPage === 'analytics' || initialPage === 'stats') {
+    switchTab('tab-analytics');
   } else {
     switchTab('tab-operations');
   }

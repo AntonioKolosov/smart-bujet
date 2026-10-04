@@ -12,6 +12,7 @@ from src.bot.keyboards.inline import (
     deposits_keyboard,
     credits_keyboard,
     family_keyboard,
+    analytics_keyboard,
 )
 from src.bot.messages import BotMessages
 from src.services.transaction_service import TransactionService
@@ -54,6 +55,16 @@ async def cmd_credits(message: Message):
         "💳 <b>Кредиты и займы</b>\n\n"
         "Отслеживайте активные кредиты, остаток долга и график погашения во весь экран:",
         reply_markup=credits_keyboard(url)
+    )
+
+@router.message(Command("analytics"))
+@router.message(Command("stats"))
+async def cmd_analytics(message: Message):
+    url = f"{get_miniapp_url()}?page=analytics"
+    await message.answer(
+        "📊 <b>Финансовая аналитика и статистика</b>\n\n"
+        "Смотрите круговые диаграммы по категориям трат и помесячную динамику расходов во весь экран:",
+        reply_markup=analytics_keyboard(url)
     )
 
 @router.message(CommandStart())

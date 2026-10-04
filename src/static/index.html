@@ -6,7 +6,7 @@
   <title>Smart Bujet — Журнал и Депозиты</title>
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="/static/styles.css?v=2.3">
+  <link rel="stylesheet" href="/static/styles.css?v=2.4">
 </head>
 <body>
   <div id="app" class="container">
@@ -18,43 +18,151 @@
       </div>
     </header>
 
-    <!-- Tab 1: Operations (История транзакций) -->
+    <!-- Tab 1: Operations (История транзакций & Семейный бюджет) -->
     <section id="tab-operations" class="tab-pane active">
-      <div class="header-balance-card">
-        <span class="balance-label">Текущий баланс</span>
-        <span class="balance-value" id="currentBalance">0 ₸</span>
+      <!-- Operations Mode Switcher: Личные / Семейные -->
+      <div class="view-mode-toggle" id="operationsModeToggle">
+        <button class="mode-pill active" id="btnOpsPersonal" data-mode="personal">
+          <span>👤 Личные операции</span>
+        </button>
+        <button class="mode-pill" id="btnOpsFamily" data-mode="family">
+          <span>👨‍👩‍👧‍👦 Семейный бюджет</span>
+        </button>
       </div>
 
-      <div class="header-summary">
-        <div class="summary-card">
-          <span class="summary-label" id="expensePeriodLabel">Расход за месяц</span>
-          <span class="summary-value expense" id="totalExpense">0 ₸</span>
+      <!-- Personal Operations View -->
+      <div id="opsPersonalView">
+        <div class="header-balance-card">
+          <span class="balance-label">Текущий баланс</span>
+          <span class="balance-value" id="currentBalance">0 ₸</span>
         </div>
-        <div class="summary-card">
-          <span class="summary-label" id="incomePeriodLabel">Доход за месяц</span>
-          <span class="summary-value income" id="totalIncome">0 ₸</span>
+
+        <div class="header-summary">
+          <div class="summary-card">
+            <span class="summary-label" id="expensePeriodLabel">Расход за месяц</span>
+            <span class="summary-value expense" id="totalExpense">0 ₸</span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-label" id="incomePeriodLabel">Доход за месяц</span>
+            <span class="summary-value income" id="totalIncome">0 ₸</span>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <h2 class="section-title">История транзакций</h2>
+          <button id="refreshBtn" class="refresh-btn" title="Обновить">↻</button>
+        </div>
+
+        <div id="loader" class="loader-container hidden">
+          <div class="spinner"></div>
+          <p>Загрузка операций...</p>
+        </div>
+
+        <div id="errorMessage" class="error-banner hidden"></div>
+
+        <div id="emptyMessage" class="empty-banner hidden">
+          <div class="empty-icon">🧾</div>
+          <p class="empty-title">Транзакций пока нет</p>
+          <span class="empty-desc">Отправьте боту текст, голосовое сообщение или фото чека</span>
+        </div>
+
+        <main id="txList" class="tx-list"></main>
+      </div>
+
+      <!-- Family View inside Operations -->
+      <div id="opsFamilyView" class="hidden">
+        <div id="familyLoader" class="loader-container">
+          <div class="spinner"></div>
+          <p>Загрузка семейного бюджета...</p>
+        </div>
+
+        <!-- Error State: Ошибка загрузки -->
+        <div id="familyErrorMessage" class="empty-banner hidden" style="margin: 20px 0; text-align: center;">
+          <div class="empty-icon">⚠️</div>
+          <p class="empty-title" id="familyErrorText">Ошибка загрузки семейного бюджета</p>
+          <span class="empty-desc">Попробуйте обновить страницу или повторить попытку позже</span>
+          <div style="margin-top: 16px;">
+            <button id="retryFamilyBtn" class="primary-btn-sm" style="display: inline-block;">↻ Попробовать снова</button>
+          </div>
+        </div>
+
+        <!-- State 1: Single Member (Ожидание партнера) -->
+        <div id="familyWaitingState" class="hidden">
+          <div class="family-hero-card">
+            <div class="family-hero-icon">👨‍👩‍👧‍👦</div>
+            <h2 class="family-hero-title">Семейный бюджет</h2>
+            <p class="family-hero-desc">
+              Объедините финансовый учет со второй половинкой. Вы будете видеть общие расходы, доходы и совместный баланс в реальном времени.
+            </p>
+
+            <div class="invite-box">
+              <label class="invite-label">Ваша ссылка для приглашения партнера:</label>
+              <div class="invite-input-wrap">
+                <input type="text" id="familyInviteInput" class="invite-input" readonly />
+              </div>
+              <div class="invite-actions">
+                <button id="copyInviteBtn" class="primary-btn-sm">📋 Скопировать</button>
+                <button id="shareInviteBtn" class="share-btn-sm">✈️ В Telegram</button>
+              </div>
+              <span id="copyToast" class="copy-toast hidden">Ссылка скопирована в буфер!</span>
+            </div>
+
+            <div class="family-rules-card">
+              <div class="rule-item">
+                <span class="rule-icon">🔒</span>
+                <div class="rule-text"><b>Личное пространство:</b> каждый записывает чеки в своем боте как обычно.</div>
+              </div>
+              <div class="rule-item">
+                <span class="rule-icon">📊</span>
+                <div class="rule-text"><b>Суммарный баланс:</b> семейный бюджет считается как сумма балансов двух людей.</div>
+              </div>
+              <div class="rule-item">
+                <span class="rule-icon">🏷</span>
+                <div class="rule-text"><b>Прозрачная лента:</b> в совместной истории сразу видно, кто именно совершил трату.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- State 2: Active Family (Два участника, ссылка СКРЫТА) -->
+        <div id="familyActiveState" class="hidden">
+          <!-- Совместный баланс -->
+          <div class="header-balance-card family-balance-card">
+            <span class="balance-label" id="familyGroupName">Семейный бюджет</span>
+            <span class="balance-value" id="familyCombinedBalance">0 ₸</span>
+          </div>
+
+          <!-- Совместный расход и доход за месяц -->
+          <div class="header-summary">
+            <div class="summary-card">
+              <span class="summary-label" id="familyExpenseLabel">Расход семьи (месяц)</span>
+              <span class="summary-value expense" id="familyTotalExpense">0 ₸</span>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label" id="familyIncomeLabel">Доход семьи (месяц)</span>
+              <span class="summary-value income" id="familyTotalIncome">0 ₸</span>
+            </div>
+          </div>
+
+          <!-- Карточки партнеров -->
+          <div class="toolbar">
+            <h3 class="section-title">Партнеры и балансы</h3>
+          </div>
+          <div id="familyMembersGrid" class="family-members-grid"></div>
+
+          <!-- Совместная история операций -->
+          <div class="toolbar">
+            <h3 class="section-title">Общая история операций</h3>
+            <button id="refreshFamilyBtn" class="refresh-btn" title="Обновить">↻</button>
+          </div>
+          <main id="familyTxList" class="tx-list"></main>
+
+          <!-- Покинуть группу -->
+          <div class="family-footer-actions">
+            <button id="leaveFamilyBtn" class="leave-btn">Покинуть семейную группу</button>
+          </div>
         </div>
       </div>
-
-      <div class="toolbar">
-        <h2 class="section-title">История транзакций</h2>
-        <button id="refreshBtn" class="refresh-btn" title="Обновить">↻</button>
-      </div>
-
-      <div id="loader" class="loader-container hidden">
-        <div class="spinner"></div>
-        <p>Загрузка операций...</p>
-      </div>
-
-      <div id="errorMessage" class="error-banner hidden"></div>
-
-      <div id="emptyMessage" class="empty-banner hidden">
-        <div class="empty-icon">🧾</div>
-        <p class="empty-title">Транзакций пока нет</p>
-        <span class="empty-desc">Отправьте боту текст, голосовое сообщение или фото чека</span>
-      </div>
-
-      <main id="txList" class="tx-list"></main>
     </section>
 
     <!-- Tab 2: Assets & Deposits (Депозиты и активы) -->
@@ -88,7 +196,7 @@
       <main id="assetsList" class="assets-list"></main>
     </section>
 
-    <!-- Tab 4: Credits (Кредиты и займы) -->
+    <!-- Tab 3: Credits (Кредиты и займы) -->
     <section id="tab-credits" class="tab-pane">
       <div class="header-balance-card credit-debt-card">
         <span class="balance-label">Общий остаток долга</span>
@@ -119,97 +227,62 @@
       <main id="creditsList" class="credits-list"></main>
     </section>
 
-    <!-- Tab 3: Family (Семейный бюджет) -->
-    <section id="tab-family" class="tab-pane">
-      <div id="familyLoader" class="loader-container">
+    <!-- Tab 4: Analytics (Аналитика и графики) -->
+    <section id="tab-analytics" class="tab-pane">
+      <!-- Analytics Mode Switcher: Личные / Семейные -->
+      <div class="view-mode-toggle" id="analyticsModeToggle">
+        <button class="mode-pill active" id="btnAnalyticsPersonal" data-mode="personal">
+          <span>👤 Личные</span>
+        </button>
+        <button class="mode-pill" id="btnAnalyticsFamily" data-mode="family">
+          <span>👨‍👩‍👧‍👦 Семейный режим</span>
+        </button>
+      </div>
+
+      <!-- Analytics Loader -->
+      <div id="analyticsLoader" class="loader-container hidden">
         <div class="spinner"></div>
-        <p>Загрузка семейного бюджета...</p>
+        <p>Загрузка аналитики...</p>
       </div>
 
-      <!-- Error State: Ошибка загрузки -->
-      <div id="familyErrorMessage" class="empty-banner hidden" style="margin: 20px 0; text-align: center;">
-        <div class="empty-icon">⚠️</div>
-        <p class="empty-title" id="familyErrorText">Ошибка загрузки семейного бюджета</p>
-        <span class="empty-desc">Попробуйте обновить страницу или повторить попытку позже</span>
-        <div style="margin-top: 16px;">
-          <button id="retryFamilyBtn" class="primary-btn-sm" style="display: inline-block;">↻ Попробовать снова</button>
-        </div>
-      </div>
+      <!-- Analytics Error -->
+      <div id="analyticsError" class="error-banner hidden"></div>
 
-      <!-- State 1: Single Member (Ожидание партнера) -->
-      <div id="familyWaitingState" class="hidden">
-        <div class="family-hero-card">
-          <div class="family-hero-icon">👨‍👩‍👧‍👦</div>
-          <h2 class="family-hero-title">Семейный бюджет</h2>
-          <p class="family-hero-desc">
-            Объедините финансовый учет со второй половинкой. Вы будете видеть общие расходы, доходы и совместный баланс в реальном времени.
-          </p>
-
-          <div class="invite-box">
-            <label class="invite-label">Ваша ссылка для приглашения партнера:</label>
-            <div class="invite-input-wrap">
-              <input type="text" id="familyInviteInput" class="invite-input" readonly />
-            </div>
-            <div class="invite-actions">
-              <button id="copyInviteBtn" class="primary-btn-sm">📋 Скопировать</button>
-              <button id="shareInviteBtn" class="share-btn-sm">✈️ В Telegram</button>
-            </div>
-            <span id="copyToast" class="copy-toast hidden">Ссылка скопирована в буфер!</span>
+      <!-- Analytics Content Area -->
+      <div id="analyticsContent">
+        <!-- Key Metrics Cards -->
+        <div class="analytics-metrics-grid">
+          <div class="metric-card">
+            <span class="metric-label">Расход за месяц</span>
+            <span class="metric-value" id="analyticsMonthSpend">0 ₸</span>
           </div>
-
-          <div class="family-rules-card">
-            <div class="rule-item">
-              <span class="rule-icon">🔒</span>
-              <div class="rule-text"><b>Личное пространство:</b> каждый записывает чеки в своем боте как обычно.</div>
-            </div>
-            <div class="rule-item">
-              <span class="rule-icon">📊</span>
-              <div class="rule-text"><b>Суммарный баланс:</b> семейный бюджет считается как сумма балансов двух людей.</div>
-            </div>
-            <div class="rule-item">
-              <span class="rule-icon">🏷</span>
-              <div class="rule-text"><b>Прозрачная лента:</b> в совместной истории сразу видно, кто именно совершил трату.</div>
-            </div>
+          <div class="metric-card">
+            <span class="metric-label">Средний расход</span>
+            <span class="metric-value" id="analyticsAvgSpend">0 ₸</span>
           </div>
-        </div>
-      </div>
-
-      <!-- State 2: Active Family (Два участника, ссылка СКРЫТА) -->
-      <div id="familyActiveState" class="hidden">
-        <!-- Совместный баланс -->
-        <div class="header-balance-card family-balance-card">
-          <span class="balance-label" id="familyGroupName">Семейный бюджет</span>
-          <span class="balance-value" id="familyCombinedBalance">0 ₸</span>
-        </div>
-
-        <!-- Совместный расход и доход за месяц -->
-        <div class="header-summary">
-          <div class="summary-card">
-            <span class="summary-label" id="familyExpenseLabel">Расход семьи (месяц)</span>
-            <span class="summary-value expense" id="familyTotalExpense">0 ₸</span>
-          </div>
-          <div class="summary-card">
-            <span class="summary-label" id="familyIncomeLabel">Доход семьи (месяц)</span>
-            <span class="summary-value income" id="familyTotalIncome">0 ₸</span>
+          <div class="metric-card full-width">
+            <span class="metric-label">Главная категория трат</span>
+            <span class="metric-value" id="analyticsTopCategory">—</span>
           </div>
         </div>
 
-        <!-- Карточки партнеров -->
-        <div class="toolbar">
-          <h3 class="section-title">Партнеры и балансы</h3>
+        <!-- Chart 1: Donut Chart - Categories Breakdown -->
+        <div class="chart-card">
+          <div class="chart-header">
+            <h3 class="chart-title">Категории расходов</h3>
+            <span class="period-badge" id="analyticsCategoryPeriod">Текущий месяц</span>
+          </div>
+          <div class="donut-chart-wrap" id="donutChartContainer"></div>
+          <div class="category-legend-list" id="categoryLegendList"></div>
         </div>
-        <div id="familyMembersGrid" class="family-members-grid"></div>
 
-        <!-- Совместная история операций -->
-        <div class="toolbar">
-          <h3 class="section-title">Общая история операций</h3>
-          <button id="refreshFamilyBtn" class="refresh-btn" title="Обновить">↻</button>
-        </div>
-        <main id="familyTxList" class="tx-list"></main>
-
-        <!-- Покинуть группу -->
-        <div class="family-footer-actions">
-          <button id="leaveFamilyBtn" class="leave-btn">Покинуть семейную группу</button>
+        <!-- Chart 2: Bar Chart - Monthly Dynamics (6 months) -->
+        <div class="chart-card">
+          <div class="chart-header">
+            <h3 class="chart-title">Динамика расходов по месяцам</h3>
+            <span class="period-badge">Полгода</span>
+          </div>
+          <div class="bar-chart-wrap" id="barChartContainer"></div>
         </div>
       </div>
     </section>
@@ -361,12 +434,12 @@
       <span class="nav-icon">💳</span>
       <span class="nav-text">Кредиты</span>
     </button>
-    <button class="nav-item" id="navFamilyBtn" data-tab="tab-family">
-      <span class="nav-icon">👨‍👩‍👧‍👦</span>
-      <span class="nav-text">Семья</span>
+    <button class="nav-item" id="navAnalyticsBtn" data-tab="tab-analytics">
+      <span class="nav-icon">📊</span>
+      <span class="nav-text">Аналитика</span>
     </button>
   </nav>
 
-  <script src="/static/app.js?v=2.3"></script>
+  <script src="/static/app.js?v=2.4"></script>
 </body>
 </html>

@@ -635,6 +635,32 @@ class TransactionService:
         if not raw_items:
             raise TransactionParseError("Could not parse receipt photo")
 
+        # Safeguard: Deterministic aggregation fallback for dining establishments
+        est_type = str(payload.get("establishment_type") or "").lower()
+        venue_name = payload.get("venue_name")
+        dining_keywords = ("кафе", "cafe", "ресторан", "rest", "кофейн", "coffee", "бар", "bar", "pub", "паб", "додо", "burger", "пицц", "столов", "kfc", "mcdonald")
+        is_dining = (
+            est_type == "dining"
+            or (venue_name and any(k in str(venue_name).lower() for k in dining_keywords))
+            or (len(raw_items) > 1 and all(it.get("category") in ("Еда вне дома", "Кафе и рестораны") for it in raw_items))
+        )
+
+        if is_dining and len(raw_items) > 1:
+            total_sum = Decimal(str(payload.get("total_paid") or 0))
+            if total_sum <= Decimal("0"):
+                total_sum = sum(Decimal(str(it.get("amount", 0) or 0)) for it in raw_items)
+
+            display_name = f"Кафе: {venue_name.strip()}" if venue_name else "Поход в кафе"
+            raw_items = [{
+                "item_name": display_name,
+                "category": "Еда вне дома",
+                "type": "expense",
+                "amount": float(total_sum)
+            }]
+            payload["discount_percent"] = None
+            payload["discount_amount"] = None
+            payload["total_paid"] = float(total_sum)
+
         raw_items = DiscountDistributor.distribute(
             raw_items,
             discount_percent=payload.get("discount_percent"),
