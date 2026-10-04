@@ -51,3 +51,40 @@ def confirm_transaction_keyboard(tx_id: int) -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+def tx_toggle_keyboard(transactions: Any) -> InlineKeyboardMarkup | None:
+    """Generate dynamic toggle button: [🔄 Это доход] if expense, [🔄 Это расход] if income."""
+    from src.models.category import CategoryType
+
+    tx_list = [transactions] if not isinstance(transactions, list) else transactions
+    if not tx_list:
+        return None
+
+    if len(tx_list) == 1:
+        tx = tx_list[0]
+        tx_type = getattr(tx, "type", None)
+        if tx_type == CategoryType.expense:
+            btn_text = "🔄 Это доход"
+        elif tx_type == CategoryType.income:
+            btn_text = "🔄 Это расход"
+        else:
+            return None
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=btn_text, callback_data=f"tx_toggle:{tx.id}")]
+            ]
+        )
+
+    # Multi-item batch
+    rows = []
+    for idx, tx in enumerate(tx_list[:4], start=1):
+        tx_type = getattr(tx, "type", None)
+        if tx_type == CategoryType.expense:
+            lbl = f"🔄 #{idx} Это доход"
+        elif tx_type == CategoryType.income:
+            lbl = f"🔄 #{idx} Это расход"
+        else:
+            continue
+        rows.append([InlineKeyboardButton(text=lbl, callback_data=f"tx_toggle:{tx.id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+

@@ -7,6 +7,7 @@ from src.services.transaction_service import TransactionService
 from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError, OffTopicMessageError
 from src.models.user import User
 from src.bot.messages import BotMessages
+from src.bot.keyboards.inline import tx_toggle_keyboard
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -48,7 +49,8 @@ async def process_voice_transaction(message: Message, session: AsyncSession, bot
                 txs,
                 currency=currency,
                 current_balance=bal_data["current_balance"]
-            )
+            ),
+            reply_markup=tx_toggle_keyboard(txs)
         )
     except OffTopicMessageError:
         await message.reply(BotMessages.off_topic_warning("voice"))

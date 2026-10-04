@@ -11,7 +11,9 @@ from src.core.config import settings
 from src.core.database import engine, async_session_maker
 from src.bot.bot import bot, dp
 from src.api.v1.router import api_router
+from src.models.base import Base
 from src.services.category_service import CategoryService
+from src.services.dynamic_context_service import DynamicContextService
 
 from src.core.accrual_scheduler import accrual_background_loop
 
@@ -21,14 +23,19 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Ensure database schema is up-to-date with non-breaking migrations
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text(
             "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS related_transaction_id UUID REFERENCES transactions(id) ON DELETE SET NULL;"
         ))
 
-    # Seed default system categories
+    # Seed default system categories and dynamic few-shots, sanitize poisoned aliases
     async with async_session_maker() as session:
         category_service = CategoryService(session)
         await category_service.seed_default_categories()
+
+        dynamic_service = DynamicContextService(session)
+        await dynamic_service.seed_default_few_shots()
+        await dynamic_service.sanitize_poisoned_aliases()
 
     is_real_token = (
         bool(settings.bot_token)

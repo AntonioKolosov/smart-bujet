@@ -18,6 +18,7 @@ from src.services.parser_service import ParserService
 from src.services.category_service import CategoryService
 from src.services.asset_service import AssetService
 from src.services.ai_service import AIService
+from src.services.dynamic_context_service import DynamicContextService
 from src.services.discount_service import DiscountDistributor
 from src.bot.messages import format_amount
 
@@ -88,6 +89,7 @@ class TransactionService:
         self.ai_service = ai_service or AIService()
         self.category_service = CategoryService(session)
         self.asset_service = AssetService(session)
+        self.dynamic_service = DynamicContextService(session)
 
     async def _detect_family_partner(self, user: User, text: str, item_name: str) -> User | None:
         """Detect if the transaction is directed to the user's family partner."""
@@ -299,7 +301,11 @@ class TransactionService:
                 }
                 for a in accessible_assets
             ]
-            payload = await self.ai_service.classify_text(text, cat_names, assets_context=assets_context)
+            few_shots = await self.dynamic_service.get_few_shots_for_query(text)
+            few_shots_prompt = self.dynamic_service.format_few_shots_prompt(few_shots)
+            payload = await self.ai_service.classify_text(
+                text, cat_names, assets_context=assets_context, few_shots_prompt=few_shots_prompt
+            )
             if payload.get("is_financial") is False:
                 raise OffTopicMessageError("Сообщение не относится к финансовым операциям", raw_text=text)
             raw_items = payload.get("items", [])
@@ -408,7 +414,11 @@ class TransactionService:
             for a in accessible_assets
         ]
 
-        payload = await self.ai_service.parse_voice(audio_bytes, mime_type, cat_names, assets_context=assets_context)
+        few_shots = await self.dynamic_service.get_few_shots_for_query("голос")
+        few_shots_prompt = self.dynamic_service.format_few_shots_prompt(few_shots)
+        payload = await self.ai_service.parse_voice(
+            audio_bytes, mime_type, cat_names, assets_context=assets_context, few_shots_prompt=few_shots_prompt
+        )
         if payload.get("is_financial") is False:
             raise OffTopicMessageError("Голосовое сообщение не содержит финансовых операций", raw_text=None)
         raw_items = payload.get("items", [])
