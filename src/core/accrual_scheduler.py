@@ -36,7 +36,7 @@ async def accrual_background_loop(session_maker, check_interval_seconds: int = 3
     logger.info("Starting deposit interest accrual background scheduler loop...")
     while True:
         try:
-            now = datetime.now(datetime.UTC)
+            now = datetime.now(timezone.utc)
             # Accrue on the last day of the calendar month (28/29 in Feb, 30 or 31 in other months)
             if is_last_day_of_month(now):
                 await execute_accrual_check(session_maker, target_date=now)

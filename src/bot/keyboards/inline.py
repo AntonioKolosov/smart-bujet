@@ -17,8 +17,10 @@ def welcome_back_keyboard(miniapp_url: str | None = None) -> InlineKeyboardMarku
         rows.append([InlineKeyboardButton(text="📱 Открыть журнал транзакций", web_app=WebAppInfo(url=miniapp_url))])
         deposits_url = f"{miniapp_url}?page=deposits" if "?" not in miniapp_url else f"{miniapp_url}&page=deposits"
         family_url = f"{miniapp_url}?page=family" if "?" not in miniapp_url else f"{miniapp_url}&page=family"
+        credits_url = f"{miniapp_url}?page=credits" if "?" not in miniapp_url else f"{miniapp_url}&page=credits"
         rows.append([
             InlineKeyboardButton(text="🏦 Депозиты", web_app=WebAppInfo(url=deposits_url)),
+            InlineKeyboardButton(text="💳 Кредиты", web_app=WebAppInfo(url=credits_url)),
             InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семья", web_app=WebAppInfo(url=family_url))
         ])
     rows.append([InlineKeyboardButton(text="💱 Изменить валюту", callback_data="change_currency")])
@@ -35,6 +37,13 @@ def deposits_keyboard(deposits_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🏦 Открыть Депозиты и Валюту", web_app=WebAppInfo(url=deposits_url))]
+        ]
+    )
+
+def credits_keyboard(credits_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Открыть Кредиты", web_app=WebAppInfo(url=credits_url))]
         ]
     )
 

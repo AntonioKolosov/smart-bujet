@@ -87,6 +87,38 @@
 
       <main id="assetsList" class="assets-list"></main>
     </section>
+
+    <!-- Tab 4: Credits (Кредиты и займы) -->
+    <section id="tab-credits" class="tab-pane">
+      <div class="header-balance-card credit-debt-card">
+        <span class="balance-label">Общий остаток долга</span>
+        <span class="balance-value credit-debt-value" id="totalCreditDebt">0 ₸</span>
+        <div class="networth-sub">
+          <span>Активных кредитов: <b id="activeCreditsCount">0</b></span>
+          <span>•</span>
+          <span>Ежемесячный платёж: <b id="monthlyPaymentsTotal">0 ₸</b></span>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <h2 class="section-title">Кредиты и займы</h2>
+        <button id="addCreditBtn" class="primary-btn-sm">+ Добавить</button>
+      </div>
+
+      <div id="creditsLoader" class="loader-container hidden">
+        <div class="spinner"></div>
+        <p>Загрузка кредитов...</p>
+      </div>
+
+      <div id="creditsEmpty" class="empty-banner hidden">
+        <div class="empty-icon">💳</div>
+        <p class="empty-title">Кредитов пока нет</p>
+        <span class="empty-desc">Нажмите «+ Добавить» или скажите боту: «взял кредит в каспи банке 100000»</span>
+      </div>
+
+      <main id="creditsList" class="credits-list"></main>
+    </section>
+
     <!-- Tab 3: Family (Семейный бюджет) -->
     <section id="tab-family" class="tab-pane">
       <div id="familyLoader" class="loader-container">
@@ -252,15 +284,82 @@
     </div>
   </div>
 
+  <!-- Modal: Add Credit -->
+  <div id="addCreditModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Новый кредит / займ</h3>
+        <button id="closeAddCreditModalBtn" class="close-btn">&times;</button>
+      </div>
+      <form id="addCreditForm" class="modal-form">
+        <div id="addCreditModalError" class="error-banner hidden" style="margin-bottom: 0;"></div>
+        <label class="form-label">
+          Название кредита
+          <input type="text" id="creditNameInput" class="form-input" placeholder="например: Каспи банк или Автокредит" required />
+        </label>
+        <div class="form-row">
+          <label class="form-label">
+            Банк / Организация
+            <input type="text" id="creditBankInput" class="form-input" placeholder="например: Kaspi Bank" />
+          </label>
+          <label class="form-label">
+            Валюта
+            <select id="creditCurrencySelect" class="form-select">
+              <option value="KZT">₸ KZT</option>
+              <option value="USD">$ USD</option>
+              <option value="EUR">€ EUR</option>
+              <option value="RUB">₽ RUB</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="form-label">
+            Сумма кредита
+            <input type="number" step="0.01" id="creditAmountInput" class="form-input" placeholder="0" required />
+          </label>
+          <label class="form-label">
+            Ежемесячный платёж
+            <input type="number" step="0.01" id="creditPaymentInput" class="form-input" placeholder="необязательно" />
+          </label>
+        </div>
+        <button type="submit" id="addCreditSubmitBtn" class="modal-submit-btn">Создать кредит</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Repay Credit -->
+  <div id="repayCreditModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title" id="repayCreditModalTitle">Погашение кредита</h3>
+        <button id="closeRepayCreditModalBtn" class="close-btn">&times;</button>
+      </div>
+      <form id="repayCreditForm" class="modal-form">
+        <div id="repayCreditModalError" class="error-banner hidden" style="margin-bottom: 0;"></div>
+        <input type="hidden" id="repayCreditId" />
+        <p class="action-desc" id="repayCreditModalDesc">Внесение платежа уменьшит остаток долга</p>
+        <label class="form-label">
+          Сумма платежа
+          <input type="number" step="0.01" id="repayCreditAmountInput" class="form-input" placeholder="0" required autofocus />
+        </label>
+        <button type="submit" class="modal-submit-btn" id="repayCreditSubmitBtn">Внести платёж</button>
+      </form>
+    </div>
+  </div>
+
   <!-- Persistent Bottom Navigation Bar -->
   <nav class="bottom-nav">
     <button class="nav-item active" id="navOpsBtn" data-tab="tab-operations">
-      <span class="nav-icon">💳</span>
+      <span class="nav-icon">🧾</span>
       <span class="nav-text">Операции</span>
     </button>
     <button class="nav-item" id="navAssetsBtn" data-tab="tab-assets">
       <span class="nav-icon">🏦</span>
       <span class="nav-text">Депозиты</span>
+    </button>
+    <button class="nav-item" id="navCreditsBtn" data-tab="tab-credits">
+      <span class="nav-icon">💳</span>
+      <span class="nav-text">Кредиты</span>
     </button>
     <button class="nav-item" id="navFamilyBtn" data-tab="tab-family">
       <span class="nav-icon">👨‍👩‍👧‍👦</span>

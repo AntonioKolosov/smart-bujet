@@ -17,6 +17,7 @@ from src.core.exceptions import InvalidTransactionAmountError, TransactionParseE
 from src.services.parser_service import ParserService
 from src.services.category_service import CategoryService
 from src.services.asset_service import AssetService
+from src.services.credit_service import CreditService
 from src.services.ai_service import AIService
 from src.services.dynamic_context_service import DynamicContextService
 from src.services.discount_service import DiscountDistributor
@@ -67,13 +68,20 @@ class BatchCategoryResolver:
         if not category:
             if cat_type not in self.fallback_cache:
                 cats = await self.service.category_service.get_categories(self.user_id, cat_type)
-                self.fallback_cache[cat_type] = cats[0] if cats else None
+                safe_cats = [
+                    c for c in cats
+                    if c.name not in ("Денежный перевод", "Депозит и вклады", "Покупка валюты", "Погашение кредита", "Получение кредита", "Снятие с депозита", "Продажа валюты")
+                ]
+                self.fallback_cache[cat_type] = safe_cats[0] if safe_cats else (cats[0] if cats else None)
             category = self.fallback_cache[cat_type]
 
         return category
 
     async def record_alias(self, normalized_name: str, category: Category | None) -> None:
         if not category:
+            return
+        # Do not record alias for special transfer/credit/deposit categories unless explicitly intended
+        if category.name in ("Денежный перевод", "Депозит и вклады", "Покупка валюты", "Погашение кредита", "Получение кредита"):
             return
         alias_key = (normalized_name, category.type)
         self.alias_cache[alias_key] = category
@@ -89,6 +97,7 @@ class TransactionService:
         self.ai_service = ai_service or AIService()
         self.category_service = CategoryService(session)
         self.asset_service = AssetService(session)
+        self.credit_service = CreditService(session)
         self.dynamic_service = DynamicContextService(session)
 
     async def _detect_family_partner(self, user: User, text: str, item_name: str) -> User | None:
@@ -287,8 +296,13 @@ class TransactionService:
 
         if parsed:
             amount, item_name = parsed
-            raw_items = [{"amount": amount, "item_name": item_name, "type": "expense", "category": None}]
-        else:
+            normalized_name = ParserService.normalize_item_name(item_name)
+            # Only use fast-path if user already has an established alias for this item
+            known_alias = await self._get_alias_category(user_id, normalized_name, CategoryType.expense)
+            if known_alias:
+                raw_items = [{"amount": amount, "item_name": normalized_name, "type": "expense", "category": known_alias.name}]
+
+        if not raw_items:
             available_cats = await self.category_service.get_categories(user_id)
             cat_names = list({c.name for c in available_cats})
             accessible_assets = await self.asset_service.get_accessible_assets(user_id)
@@ -301,10 +315,24 @@ class TransactionService:
                 }
                 for a in accessible_assets
             ]
+            user_credits = await self.credit_service.get_user_credits(user_id, active_only=True)
+            credits_context = [
+                {
+                    "id": str(c.id),
+                    "name": c.name,
+                    "remaining_amount": float(c.remaining_amount),
+                    "currency": c.currency,
+                }
+                for c in user_credits
+            ]
             few_shots = await self.dynamic_service.get_few_shots_for_query(text)
             few_shots_prompt = self.dynamic_service.format_few_shots_prompt(few_shots)
             payload = await self.ai_service.classify_text(
-                text, cat_names, assets_context=assets_context, few_shots_prompt=few_shots_prompt
+                text,
+                cat_names,
+                assets_context=assets_context,
+                credits_context=credits_context,
+                few_shots_prompt=few_shots_prompt
             )
             if payload.get("is_financial") is False:
                 raise OffTopicMessageError("Сообщение не относится к финансовым операциям", raw_text=text)
@@ -346,8 +374,41 @@ class TransactionService:
             disc_amt = item.get("discount_amount")
 
             asset_account_id = None
+            credit_account_id = None
             asset_amt = item.get("asset_amount")
             ex_rate = item.get("exchange_rate")
+
+            credit_action = item.get("credit_action")
+            if credit_action == "take" or item.get("category") == "Получение кредита":
+                credit_name = item.get("target_credit_name") or item.get("item_name") or "Кредит"
+                if credit_name.lower().startswith("кредит:"):
+                    credit_name = credit_name.split(":", 1)[1].strip()
+                new_credit = await self.credit_service.create_credit(
+                    user_id=user_id,
+                    name=credit_name,
+                    original_amount=amt,
+                    currency=user.currency if user else "KZT"
+                )
+                credit_account_id = new_credit.id
+                normalized_name = f"Кредит: {new_credit.name}"
+            elif credit_action == "repay" or item.get("category") == "Погашение кредита":
+                target_credit_name = item.get("target_credit_name") or item.get("item_name")
+                credit_hint = item.get("credit_account_id")
+                credit = await self.credit_service.resolve_credit_account(
+                    user_id=user_id,
+                    target_name=target_credit_name,
+                    credit_id_hint=credit_hint
+                )
+                if credit:
+                    updated_credit, was_closed = await self.credit_service.repay_credit(
+                        user_id=user_id,
+                        credit_id=credit.id,
+                        amount=amt
+                    )
+                    credit_account_id = credit.id
+                    rem_str = f"{float(updated_credit.remaining_amount):,.2f}".replace(",", " ")
+                    status_suffix = " (Закрыт! 🎉)" if was_closed else f" (Остаток: {rem_str} {updated_credit.currency})"
+                    normalized_name = f"Погашение: {credit.name}{status_suffix}"
 
             if cat_type in (CategoryType.transfer_out, CategoryType.transfer_in):
                 asset_account_id, asset_acc_name = await self._handle_asset_transfer(
@@ -371,6 +432,7 @@ class TransactionService:
                 discount_amount=float(disc_amt) if disc_amt is not None else None,
                 type=cat_type,
                 asset_account_id=asset_account_id,
+                credit_account_id=credit_account_id,
                 asset_amount=float(asset_amt) if asset_amt is not None else None,
                 exchange_rate=float(ex_rate) if ex_rate is not None else None,
                 item_name=normalized_name,
@@ -414,10 +476,26 @@ class TransactionService:
             for a in accessible_assets
         ]
 
+        user_credits = await self.credit_service.get_user_credits(user_id, active_only=True)
+        credits_context = [
+            {
+                "id": str(c.id),
+                "name": c.name,
+                "remaining_amount": float(c.remaining_amount),
+                "currency": c.currency,
+            }
+            for c in user_credits
+        ]
+
         few_shots = await self.dynamic_service.get_few_shots_for_query("голос")
         few_shots_prompt = self.dynamic_service.format_few_shots_prompt(few_shots)
         payload = await self.ai_service.parse_voice(
-            audio_bytes, mime_type, cat_names, assets_context=assets_context, few_shots_prompt=few_shots_prompt
+            audio_bytes,
+            mime_type,
+            cat_names,
+            assets_context=assets_context,
+            credits_context=credits_context,
+            few_shots_prompt=few_shots_prompt
         )
         if payload.get("is_financial") is False:
             raise OffTopicMessageError("Голосовое сообщение не содержит финансовых операций", raw_text=None)
@@ -458,8 +536,41 @@ class TransactionService:
             disc_amt = item.get("discount_amount")
 
             asset_account_id = None
+            credit_account_id = None
             asset_amt = item.get("asset_amount")
             ex_rate = item.get("exchange_rate")
+
+            credit_action = item.get("credit_action")
+            if credit_action == "take" or item.get("category") == "Получение кредита":
+                credit_name = item.get("target_credit_name") or item.get("item_name") or "Кредит"
+                if credit_name.lower().startswith("кредит:"):
+                    credit_name = credit_name.split(":", 1)[1].strip()
+                new_credit = await self.credit_service.create_credit(
+                    user_id=user_id,
+                    name=credit_name,
+                    original_amount=amt,
+                    currency=user.currency if user else "KZT"
+                )
+                credit_account_id = new_credit.id
+                normalized_name = f"Кредит: {new_credit.name}"
+            elif credit_action == "repay" or item.get("category") == "Погашение кредита":
+                target_credit_name = item.get("target_credit_name") or item.get("item_name")
+                credit_hint = item.get("credit_account_id")
+                credit = await self.credit_service.resolve_credit_account(
+                    user_id=user_id,
+                    target_name=target_credit_name,
+                    credit_id_hint=credit_hint
+                )
+                if credit:
+                    updated_credit, was_closed = await self.credit_service.repay_credit(
+                        user_id=user_id,
+                        credit_id=credit.id,
+                        amount=amt
+                    )
+                    credit_account_id = credit.id
+                    rem_str = f"{float(updated_credit.remaining_amount):,.2f}".replace(",", " ")
+                    status_suffix = " (Закрыт! 🎉)" if was_closed else f" (Остаток: {rem_str} {updated_credit.currency})"
+                    normalized_name = f"Погашение: {credit.name}{status_suffix}"
 
             if cat_type in (CategoryType.transfer_out, CategoryType.transfer_in):
                 asset_account_id, asset_acc_name = await self._handle_asset_transfer(
@@ -483,6 +594,7 @@ class TransactionService:
                 discount_amount=float(disc_amt) if disc_amt is not None else None,
                 type=cat_type,
                 asset_account_id=asset_account_id,
+                credit_account_id=credit_account_id,
                 asset_amount=float(asset_amt) if asset_amt is not None else None,
                 exchange_rate=float(ex_rate) if ex_rate is not None else None,
                 item_name=normalized_name,

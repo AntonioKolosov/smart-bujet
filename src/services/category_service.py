@@ -23,6 +23,8 @@ DEFAULT_CATEGORIES = [
     ("Снятие с депозита", CategoryType.transfer_in),
     ("Продажа валюты", CategoryType.transfer_in),
     ("Проценты по вкладу", CategoryType.income),
+    ("Погашение кредита", CategoryType.expense),
+    ("Получение кредита", CategoryType.income),
 ]
 
 

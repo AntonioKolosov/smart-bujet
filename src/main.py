@@ -27,6 +27,9 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS related_transaction_id UUID REFERENCES transactions(id) ON DELETE SET NULL;"
         ))
+        await conn.execute(text(
+            "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS credit_account_id UUID REFERENCES credit_accounts(id) ON DELETE SET NULL;"
+        ))
 
     # Seed default system categories and dynamic few-shots, sanitize poisoned aliases
     async with async_session_maker() as session:

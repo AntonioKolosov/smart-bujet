@@ -49,9 +49,11 @@
   const currencyBadgeEl = document.getElementById('currencyBadge');
   const navOpsBtn = document.getElementById('navOpsBtn');
   const navAssetsBtn = document.getElementById('navAssetsBtn');
+  const navCreditsBtn = document.getElementById('navCreditsBtn');
   const navFamilyBtn = document.getElementById('navFamilyBtn');
   const tabOps = document.getElementById('tab-operations');
   const tabAssets = document.getElementById('tab-assets');
+  const tabCredits = document.getElementById('tab-credits');
   const tabFamily = document.getElementById('tab-family');
 
   // DOM Elements - Family Tab
@@ -108,6 +110,34 @@
   const actionTypeInput = document.getElementById('actionType');
   const actionAmountInput = document.getElementById('actionAmountInput');
 
+  // DOM Elements - Credits Tab
+  const totalCreditDebtEl = document.getElementById('totalCreditDebt');
+  const activeCreditsCountEl = document.getElementById('activeCreditsCount');
+  const monthlyPaymentsTotalEl = document.getElementById('monthlyPaymentsTotal');
+  const creditsListEl = document.getElementById('creditsList');
+  const creditsLoaderEl = document.getElementById('creditsLoader');
+  const creditsEmptyEl = document.getElementById('creditsEmpty');
+  const addCreditBtn = document.getElementById('addCreditBtn');
+
+  // DOM Elements - Credits Modals
+  const addCreditModal = document.getElementById('addCreditModal');
+  const closeAddCreditModalBtn = document.getElementById('closeAddCreditModalBtn');
+  const addCreditForm = document.getElementById('addCreditForm');
+  const addCreditModalErrorEl = document.getElementById('addCreditModalError');
+  const creditNameInput = document.getElementById('creditNameInput');
+  const creditBankInput = document.getElementById('creditBankInput');
+  const creditCurrencySelect = document.getElementById('creditCurrencySelect');
+  const creditAmountInput = document.getElementById('creditAmountInput');
+  const creditPaymentInput = document.getElementById('creditPaymentInput');
+
+  const repayCreditModal = document.getElementById('repayCreditModal');
+  const closeRepayCreditModalBtn = document.getElementById('closeRepayCreditModalBtn');
+  const repayCreditForm = document.getElementById('repayCreditForm');
+  const repayCreditModalTitle = document.getElementById('repayCreditModalTitle');
+  const repayCreditIdInput = document.getElementById('repayCreditId');
+  const repayCreditAmountInput = document.getElementById('repayCreditAmountInput');
+  const repayCreditModalErrorEl = document.getElementById('repayCreditModalError');
+
   function getHeaders() {
     const headers = { 'Content-Type': 'application/json' };
     if (tg && tg.initData) {
@@ -151,8 +181,8 @@
 
   // --- Tab Navigation ---
   function switchTab(tabId) {
-    [tabOps, tabAssets, tabFamily].forEach(t => t && t.classList.remove('active'));
-    [navOpsBtn, navAssetsBtn, navFamilyBtn].forEach(b => b && b.classList.remove('active'));
+    [tabOps, tabAssets, tabCredits, tabFamily].forEach(t => t && t.classList.remove('active'));
+    [navOpsBtn, navAssetsBtn, navCreditsBtn, navFamilyBtn].forEach(b => b && b.classList.remove('active'));
 
     if (tabId === 'tab-family') {
       if (tabFamily) tabFamily.classList.add('active');
@@ -162,6 +192,10 @@
       if (tabAssets) tabAssets.classList.add('active');
       if (navAssetsBtn) navAssetsBtn.classList.add('active');
       fetchAssets();
+    } else if (tabId === 'tab-credits') {
+      if (tabCredits) tabCredits.classList.add('active');
+      if (navCreditsBtn) navCreditsBtn.classList.add('active');
+      fetchCredits();
     } else {
       if (tabOps) tabOps.classList.add('active');
       if (navOpsBtn) navOpsBtn.classList.add('active');
@@ -170,6 +204,7 @@
 
   if (navOpsBtn) navOpsBtn.addEventListener('click', () => switchTab('tab-operations'));
   if (navAssetsBtn) navAssetsBtn.addEventListener('click', () => switchTab('tab-assets'));
+  if (navCreditsBtn) navCreditsBtn.addEventListener('click', () => switchTab('tab-credits'));
   if (navFamilyBtn) navFamilyBtn.addEventListener('click', () => switchTab('tab-family'));
 
   // --- Data Fetching ---
@@ -578,7 +613,247 @@
         actionSubmitBtn.textContent = 'Подтвердить';
       }
     }
-  });
+  // --- Credits Logic ---
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  async function fetchCredits() {
+    if (creditsLoaderEl) creditsLoaderEl.classList.remove('hidden');
+    if (creditsEmptyEl) creditsEmptyEl.classList.add('hidden');
+    if (creditsListEl) creditsListEl.innerHTML = '';
+
+    try {
+      const [sumRes, listRes] = await Promise.all([
+        fetch('/api/v1/credits/summary', { headers: getHeaders() }),
+        fetch('/api/v1/credits/', { headers: getHeaders() })
+      ]);
+
+      if (sumRes.ok) {
+        const sumData = await sumRes.json();
+        if (totalCreditDebtEl) totalCreditDebtEl.textContent = formatMoney(sumData.total_debt);
+        if (activeCreditsCountEl) activeCreditsCountEl.textContent = sumData.active_credits_count;
+        if (monthlyPaymentsTotalEl) monthlyPaymentsTotalEl.textContent = formatMoney(sumData.total_monthly_payment);
+      }
+
+      if (listRes.ok) {
+        const credits = await listRes.json();
+        renderCredits(credits);
+      }
+    } catch (err) {
+      console.error('Failed to load credits:', err);
+    } finally {
+      if (creditsLoaderEl) creditsLoaderEl.classList.add('hidden');
+    }
+  }
+
+  function renderCredits(credits) {
+    if (!creditsListEl) return;
+    creditsListEl.innerHTML = '';
+
+    if (!credits || credits.length === 0) {
+      if (creditsEmptyEl) creditsEmptyEl.classList.remove('hidden');
+      return;
+    }
+    if (creditsEmptyEl) creditsEmptyEl.classList.add('hidden');
+
+    credits.forEach(cr => {
+      const card = document.createElement('div');
+      card.className = `credit-item ${cr.is_active ? '' : 'closed'}`;
+
+      const orig = Number(cr.original_amount) || 0;
+      const rem = Number(cr.remaining_amount) || 0;
+      const repaid = Math.max(0, orig - rem);
+      const pct = orig > 0 ? Math.min(100, Math.round((repaid / orig) * 100)) : (cr.is_active ? 0 : 100);
+
+      card.innerHTML = `
+        <div class="credit-header">
+          <div class="credit-name-box">
+            <span class="credit-title">${escapeHtml(cr.name)}</span>
+            ${cr.bank_name ? `<span class="credit-bank">${escapeHtml(cr.bank_name)}</span>` : ''}
+          </div>
+          <span class="credit-badge ${cr.is_active ? 'active' : 'paid'}">
+            ${cr.is_active ? 'Активен' : 'Выплачен 🎉'}
+          </span>
+        </div>
+        <div class="credit-amounts-row">
+          <div>
+            <div class="credit-remaining ${cr.is_active ? '' : 'paid'}">${formatMoney(rem, cr.currency)}</div>
+            <div class="credit-original">из ${formatMoney(orig, cr.currency)} (${pct}% выплачено)</div>
+          </div>
+        </div>
+        <div class="credit-progress-wrap">
+          <div class="credit-progress-bar" style="width: ${pct}%"></div>
+        </div>
+        <div class="credit-actions-row">
+          <span class="credit-details-text">
+            ${cr.monthly_payment ? `Платёж: ${formatMoney(cr.monthly_payment, cr.currency)}/мес` : ''}
+          </span>
+          ${cr.is_active ? `<button class="credit-repay-btn" data-id="${cr.id}">Внести платёж</button>` : ''}
+        </div>
+      `;
+
+      const repayBtn = card.querySelector('.credit-repay-btn');
+      if (repayBtn) {
+        repayBtn.addEventListener('click', () => openRepayCreditModal(cr));
+      }
+
+      creditsListEl.appendChild(card);
+    });
+  }
+
+  function openRepayCreditModal(credit) {
+    if (!repayCreditModal) return;
+    repayCreditIdInput.value = credit.id;
+    repayCreditAmountInput.value = '';
+    if (repayCreditModalTitle) repayCreditModalTitle.textContent = `Платёж: ${credit.name}`;
+    if (repayCreditModalErrorEl) repayCreditModalErrorEl.classList.add('hidden');
+    repayCreditModal.classList.remove('hidden');
+    repayCreditAmountInput.focus();
+  }
+
+  if (closeRepayCreditModalBtn) {
+    closeRepayCreditModalBtn.addEventListener('click', () => {
+      if (repayCreditModal) repayCreditModal.classList.add('hidden');
+    });
+  }
+
+  if (repayCreditForm) {
+    repayCreditForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const creditId = repayCreditIdInput.value;
+      const amount = Number(repayCreditAmountInput.value);
+
+      if (!amount || amount <= 0) {
+        if (repayCreditModalErrorEl) {
+          repayCreditModalErrorEl.textContent = 'Укажите корректную сумму платежа';
+          repayCreditModalErrorEl.classList.remove('hidden');
+        }
+        return;
+      }
+
+      const submitBtn = document.getElementById('repayCreditSubmitBtn');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Обработка...';
+      }
+
+      try {
+        const res = await fetch(`/api/v1/credits/${creditId}/repay`, {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ amount })
+        });
+        if (res.ok) {
+          repayCreditModal.classList.add('hidden');
+          repayCreditForm.reset();
+          await fetchCredits();
+          await fetchProfile();
+          await fetchTransactions();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          if (repayCreditModalErrorEl) {
+            repayCreditModalErrorEl.textContent = err.detail || 'Ошибка проведения платежа';
+            repayCreditModalErrorEl.classList.remove('hidden');
+          }
+        }
+      } catch (err) {
+        if (repayCreditModalErrorEl) {
+          repayCreditModalErrorEl.textContent = 'Ошибка соединения с сервером';
+          repayCreditModalErrorEl.classList.remove('hidden');
+        }
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Внести платёж';
+        }
+      }
+    });
+  }
+
+  if (addCreditBtn) {
+    addCreditBtn.addEventListener('click', () => {
+      if (!addCreditModal) return;
+      addCreditForm.reset();
+      if (creditCurrencySelect) creditCurrencySelect.value = userCurrency;
+      if (addCreditModalErrorEl) addCreditModalErrorEl.classList.add('hidden');
+      addCreditModal.classList.remove('hidden');
+      if (creditNameInput) creditNameInput.focus();
+    });
+  }
+
+  if (closeAddCreditModalBtn) {
+    closeAddCreditModalBtn.addEventListener('click', () => {
+      if (addCreditModal) addCreditModal.classList.add('hidden');
+    });
+  }
+
+  if (addCreditForm) {
+    addCreditForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = creditNameInput.value.trim();
+      const bank_name = creditBankInput.value.trim() || null;
+      const currency = creditCurrencySelect.value;
+      const original_amount = Number(creditAmountInput.value);
+      const monthly_payment = creditPaymentInput.value ? Number(creditPaymentInput.value) : null;
+
+      if (!name || !original_amount || original_amount <= 0) {
+        if (addCreditModalErrorEl) {
+          addCreditModalErrorEl.textContent = 'Укажите название и корректную сумму кредита';
+          addCreditModalErrorEl.classList.remove('hidden');
+        }
+        return;
+      }
+
+      const submitBtn = document.getElementById('addCreditSubmitBtn');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Создание...';
+      }
+
+      try {
+        const res = await fetch('/api/v1/credits/', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({
+            name,
+            bank_name,
+            currency,
+            original_amount,
+            monthly_payment
+          })
+        });
+
+        if (res.ok) {
+          addCreditModal.classList.add('hidden');
+          addCreditForm.reset();
+          await fetchCredits();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          if (addCreditModalErrorEl) {
+            addCreditModalErrorEl.textContent = err.detail || 'Не удалось создать кредит';
+            addCreditModalErrorEl.classList.remove('hidden');
+          }
+        }
+      } catch (err) {
+        if (addCreditModalErrorEl) {
+          addCreditModalErrorEl.textContent = 'Ошибка соединения с сервером';
+          addCreditModalErrorEl.classList.remove('hidden');
+        }
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Создать кредит';
+        }
+      }
+    });
+  }
 
   // --- Family Budget Logic ---
   async function fetchFamilySummary() {
@@ -758,9 +1033,10 @@
     fetchProfile();
     fetchTransactions();
     fetchAssets();
+    fetchCredits();
   });
 
-  // Check URL params for deep linking (e.g. ?page=deposits, ?page=family)
+  // Check URL params for deep linking (e.g. ?page=deposits, ?page=family, ?page=credits)
   const urlParams = new URLSearchParams(window.location.search);
   const initialPage = urlParams.get('page') || window.location.hash.replace('#', '');
 
@@ -769,6 +1045,8 @@
     fetchTransactions();
     if (initialPage === 'deposits' || initialPage === 'assets') {
       switchTab('tab-assets');
+    } else if (initialPage === 'credits' || initialPage === 'loans') {
+      switchTab('tab-credits');
     } else if (initialPage === 'family' || initialPage === 'fam') {
       switchTab('tab-family');
     }

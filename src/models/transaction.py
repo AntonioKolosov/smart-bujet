@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from src.models.family import FamilyGroup
     from src.models.category import Category
     from src.models.asset import AssetAccount
+    from src.models.credit import CreditAccount
 
 
 class TransactionSource(str, Enum):
@@ -41,6 +42,7 @@ class Transaction(Base, TimestampMixin):
     asset_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     exchange_rate: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     related_transaction_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True)
+    credit_account_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("credit_accounts.id", ondelete="SET NULL"), nullable=True)
     item_name: Mapped[str | None] = mapped_column(String(255))
     raw_text: Mapped[str | None] = mapped_column(Text)
     source: Mapped[TransactionSource] = mapped_column()
@@ -51,6 +53,7 @@ class Transaction(Base, TimestampMixin):
     category: Mapped["Category"] = relationship("Category", back_populates="transactions")
     asset_account: Mapped[Optional["AssetAccount"]] = relationship("AssetAccount", back_populates="transactions")
     related_transaction: Mapped[Optional["Transaction"]] = relationship("Transaction", remote_side="Transaction.id", foreign_keys=[related_transaction_id], post_update=True)
+    credit_account: Mapped[Optional["CreditAccount"]] = relationship("CreditAccount", back_populates="transactions")
 
     @property
     def category_name(self) -> str | None:
