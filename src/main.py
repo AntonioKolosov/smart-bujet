@@ -70,6 +70,7 @@ async def lifespan(app: FastAPI):
             await bot.set_my_commands([
                 BotCommand(command="miniapp", description="Открыть журнал транзакций"),
                 BotCommand(command="deposits", description="Депозиты и сбережения"),
+                BotCommand(command="credits", description="Кредиты и займы"),
                 BotCommand(command="family", description="Семейный бюджет"),
                 BotCommand(command="start", description="Перезапустить бота"),
             ])
@@ -108,4 +109,8 @@ if os.path.exists(static_dir):
     @app.get("/app", include_in_schema=False)
     @app.get("/", include_in_schema=False)
     async def serve_miniapp():
-        return FileResponse(os.path.join(static_dir, "index.html"))
+        response = FileResponse(os.path.join(static_dir, "index.html"))
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response

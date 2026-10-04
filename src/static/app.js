@@ -613,6 +613,8 @@
         actionSubmitBtn.textContent = 'Подтвердить';
       }
     }
+  });
+
   // --- Credits Logic ---
   function escapeHtml(str) {
     if (!str) return '';
@@ -1038,17 +1040,20 @@
 
   // Check URL params for deep linking (e.g. ?page=deposits, ?page=family, ?page=credits)
   const urlParams = new URLSearchParams(window.location.search);
-  const initialPage = urlParams.get('page') || window.location.hash.replace('#', '');
+  const initialPage = (urlParams.get('page') || window.location.hash.replace('#', '') || '').toLowerCase();
 
-  // Initial load
-  fetchProfile().then(() => {
-    fetchTransactions();
-    if (initialPage === 'deposits' || initialPage === 'assets') {
-      switchTab('tab-assets');
-    } else if (initialPage === 'credits' || initialPage === 'loans') {
-      switchTab('tab-credits');
-    } else if (initialPage === 'family' || initialPage === 'fam') {
-      switchTab('tab-family');
+  if (initialPage === 'deposits' || initialPage === 'assets') {
+    switchTab('tab-assets');
+  } else if (initialPage === 'credits' || initialPage === 'loans') {
+    switchTab('tab-credits');
+  } else if (initialPage === 'family' || initialPage === 'fam') {
+    switchTab('tab-family');
+  }
+
+  // Initial load profile and operations
+  fetchProfile().finally(() => {
+    if (!initialPage || initialPage === 'operations' || initialPage === 'ops') {
+      fetchTransactions();
     }
   });
 })();

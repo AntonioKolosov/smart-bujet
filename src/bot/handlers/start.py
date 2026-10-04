@@ -5,7 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from src.models.user import User
 from src.core.config import settings
-from src.bot.keyboards.inline import currency_keyboard, welcome_back_keyboard, miniapp_keyboard, deposits_keyboard, family_keyboard
+from src.bot.keyboards.inline import (
+    currency_keyboard,
+    welcome_back_keyboard,
+    miniapp_keyboard,
+    deposits_keyboard,
+    credits_keyboard,
+    family_keyboard,
+)
 from src.bot.messages import BotMessages
 from src.services.transaction_service import TransactionService
 from src.services.family_service import FamilyService
@@ -37,6 +44,16 @@ async def cmd_deposits(message: Message):
         "🏦 <b>Депозиты, сбережения и валютные счета</b>\n\n"
         "Управляйте вашими банковскими вкладами, копилками и валютными счетами во весь экран:",
         reply_markup=deposits_keyboard(url)
+    )
+
+@router.message(Command("credits"))
+@router.message(Command("loans"))
+async def cmd_credits(message: Message):
+    url = f"{get_miniapp_url()}?page=credits"
+    await message.answer(
+        "💳 <b>Кредиты и займы</b>\n\n"
+        "Отслеживайте активные кредиты, остаток долга и график погашения во весь экран:",
+        reply_markup=credits_keyboard(url)
     )
 
 @router.message(CommandStart())
