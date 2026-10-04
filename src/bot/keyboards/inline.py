@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from typing import Any
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 def currency_keyboard() -> InlineKeyboardMarkup:
