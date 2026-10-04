@@ -19,6 +19,48 @@
     }
   }
 
+  // Theme Detection (Dark vs High-Contrast Light)
+  function isColorLight(hex) {
+    if (!hex) return false;
+    const clean = hex.replace('#', '');
+    if (clean.length !== 6) return false;
+    const r = parseInt(clean.substring(0, 2), 16);
+    const g = parseInt(clean.substring(2, 4), 16);
+    const b = parseInt(clean.substring(4, 6), 16);
+    return (r * 299 + g * 587 + b * 114) / 1000 > 160;
+  }
+
+  function applyTheme() {
+    let isLight = false;
+    if (tg?.colorScheme === 'light') {
+      isLight = true;
+    } else if (tg?.colorScheme === 'dark') {
+      isLight = false;
+    } else if (tg?.themeParams?.bg_color) {
+      isLight = isColorLight(tg.themeParams.bg_color);
+    } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+      isLight = true;
+    }
+
+    if (isLight) {
+      document.body.classList.add('theme-light');
+      document.body.classList.remove('theme-dark');
+    } else {
+      document.body.classList.add('theme-dark');
+      document.body.classList.remove('theme-light');
+    }
+  }
+
+  applyTheme();
+  if (tg?.onEvent) {
+    tg.onEvent('themeChanged', () => {
+      applyTheme();
+      if (tabAnalytics && tabAnalytics.classList.contains('active')) {
+        fetchAnalytics(currentAnalyticsMode === 'family');
+      }
+    });
+  }
+
   const CURRENCY_SYMBOLS = {
     KZT: '₸',
     RUB: '₽',
@@ -1171,14 +1213,17 @@
       return;
     }
 
-    const radius = 68;
-    const strokeWidth = 22;
-    const circumference = 2 * Math.PI * radius; // ~427.2566
+    const radius = 70;
+    const strokeWidth = 20;
+    const circumference = 2 * Math.PI * radius; // ~439.82297
     let accumulatedOffset = 0;
     const hasMultiple = categories.length > 1;
 
+    const isLight = document.body.classList.contains('theme-light');
+    const trackColor = isLight ? 'rgba(15, 23, 42, 0.06)' : 'rgba(255, 255, 255, 0.05)';
+
     let circlesSvg = `
-      <circle cx="100" cy="100" r="${radius}" fill="transparent" stroke="rgba(255, 255, 255, 0.05)" stroke-width="${strokeWidth}" />
+      <circle cx="100" cy="100" r="${radius}" fill="transparent" stroke="${trackColor}" stroke-width="${strokeWidth}" />
     `;
 
     categories.forEach(cat => {
@@ -1235,6 +1280,7 @@
       return;
     }
 
+    const isLight = document.body.classList.contains('theme-light');
     const svgWidth = 330;
     const svgHeight = 160;
     const padTop = 26;
@@ -1248,6 +1294,11 @@
     const slotWidth = availWidth / count;
     const barWidth = Math.min(30, Math.max(16, slotWidth * 0.6));
 
+    const baselineColor = isLight ? 'rgba(15, 23, 42, 0.12)' : 'rgba(255, 255, 255, 0.1)';
+    const amountColor = isLight ? '#0f172a' : '#cbd5e1';
+    const labelColor = isLight ? '#334155' : '#94a3b8';
+    const emptyBarColor = isLight ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.15)';
+
     let barsSvg = '';
     history.forEach((item, idx) => {
       const exp = Number(item.total_expense) || 0;
@@ -1260,9 +1311,9 @@
 
       barsSvg += `
         <g class="bar-group">
-          ${exp > 0 ? `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="4" fill="url(#barGradient)" opacity="0.9" />` : `<rect x="${x}" y="${svgHeight - padBottom - 2}" width="${barWidth}" height="2" rx="1" fill="rgba(255,255,255,0.15)" />`}
-          <text x="${x + barWidth / 2}" y="${y - 6}" text-anchor="middle" fill="#cbd5e1" font-size="10" font-weight="700">${amountText}</text>
-          <text x="${x + barWidth / 2}" y="${svgHeight - 10}" text-anchor="middle" fill="#94a3b8" font-size="11" font-weight="500">${label}</text>
+          ${exp > 0 ? `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="4" fill="url(#barGradient)" opacity="0.9" />` : `<rect x="${x}" y="${svgHeight - padBottom - 2}" width="${barWidth}" height="2" rx="1" fill="${emptyBarColor}" />`}
+          <text x="${x + barWidth / 2}" y="${y - 6}" text-anchor="middle" fill="${amountColor}" font-size="10" font-weight="700">${amountText}</text>
+          <text x="${x + barWidth / 2}" y="${svgHeight - 10}" text-anchor="middle" fill="${labelColor}" font-size="11" font-weight="600">${label}</text>
         </g>
       `;
     });
@@ -1276,7 +1327,7 @@
             <stop offset="100%" stop-color="#0284c7" />
           </linearGradient>
         </defs>
-        <line x1="${padX}" y1="${baselineY}" x2="${svgWidth - padX}" y2="${baselineY}" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+        <line x1="${padX}" y1="${baselineY}" x2="${svgWidth - padX}" y2="${baselineY}" stroke="${baselineColor}" stroke-width="1" />
         ${barsSvg}
       </svg>
     `;

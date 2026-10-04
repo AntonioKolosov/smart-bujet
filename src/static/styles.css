@@ -709,8 +709,17 @@ input[type="number"] {
   border: 1px solid rgba(244, 63, 94, 0.3);
   box-shadow: 0 4px 20px rgba(136, 19, 55, 0.35);
 }
-.credit-debt-value {
-  color: #fda4af;
+.credit-debt-card .balance-label {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+.credit-debt-card .credit-debt-value {
+  color: #ffffff !important;
+}
+.credit-debt-card .networth-sub {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+.credit-debt-card .networth-sub b {
+  color: #ffffff !important;
 }
 
 .credits-list {
@@ -937,14 +946,21 @@ input[type="number"] {
 }
 
 .donut-center-total {
-  font-size: 1.15rem;
-  font-weight: 800;
+  font-size: 0.92rem;
+  font-weight: 700;
   color: var(--text-color);
+  max-width: 108px;
+  text-align: center;
+  line-height: 1.22;
 }
 
 .donut-center-sub {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   color: var(--hint-color);
+  margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
 }
 
 .category-legend-list {
@@ -1003,5 +1019,207 @@ input[type="number"] {
 .bar-chart-wrap {
   width: 100%;
   margin: 10px 0;
+}
+
+/* ========================================================
+   High-Contrast Light Theme Overrides
+   ======================================================== */
+body.theme-light,
+@media (prefers-color-scheme: light) {
+  body:not(.theme-dark) {
+    --bg-color: #f8fafc;
+    --secondary-bg-color: #ffffff;
+    --section-bg-color: #ffffff;
+    --text-color: #0f172a;
+    --hint-color: #475569;
+    --link-color: #0284c7;
+    --button-color: #0284c7;
+    --button-text-color: #ffffff;
+
+    --accent-income: #15803d;
+    --accent-expense: #dc2626;
+    --accent-discount: #059669;
+
+    background-color: #f8fafc;
+    color: #0f172a;
+  }
+}
+
+body.theme-light {
+  --bg-color: #f8fafc;
+  --secondary-bg-color: #ffffff;
+  --section-bg-color: #ffffff;
+  --text-color: #0f172a;
+  --hint-color: #475569;
+  --link-color: #0284c7;
+  --button-color: #0284c7;
+  --button-text-color: #ffffff;
+
+  --accent-income: #15803d;
+  --accent-expense: #dc2626;
+  --accent-discount: #059669;
+
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+/* Secondary & Hint typography - high contrast */
+body.theme-light .balance-label,
+body.theme-light .summary-label,
+body.theme-light .date-divider,
+body.theme-light .tx-meta,
+body.theme-light .asset-meta,
+body.theme-light .credit-bank,
+body.theme-light .credit-original,
+body.theme-light .credit-details-text,
+body.theme-light .metric-label,
+body.theme-light .period-badge,
+body.theme-light .legend-pct,
+body.theme-light .donut-center-sub,
+body.theme-light .action-desc,
+body.theme-light .form-label,
+body.theme-light .empty-desc,
+body.theme-light .family-hero-desc,
+body.theme-light .asset-converted {
+  color: #334155;
+  font-weight: 500;
+}
+
+/* Primary headings & values */
+body.theme-light .tx-title,
+body.theme-light .asset-title,
+body.theme-light .credit-title,
+body.theme-light .metric-value,
+body.theme-light .legend-name,
+body.theme-light .legend-amount,
+body.theme-light .donut-center-total,
+body.theme-light .section-title,
+body.theme-light .user-greeting,
+body.theme-light .balance-value,
+body.theme-light .modal-title,
+body.theme-light .family-hero-title,
+body.theme-light .empty-title {
+  color: #0f172a;
+}
+
+body.theme-light .net-worth-value {
+  color: #0284c7;
+}
+
+/* Light mode cards with crisp borders and subtle shadows */
+body.theme-light .header-balance-card:not(.credit-debt-card),
+body.theme-light .summary-card,
+body.theme-light .tx-card,
+body.theme-light .asset-card,
+body.theme-light .credit-item,
+body.theme-light .metric-card,
+body.theme-light .chart-card,
+body.theme-light .modal-content,
+body.theme-light .family-hero-card,
+body.theme-light .member-card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+}
+
+/* High contrast credit remaining and active badges in light mode */
+body.theme-light .credit-remaining {
+  color: #dc2626;
+  font-weight: 800;
+}
+body.theme-light .credit-badge.active {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  font-weight: 700;
+}
+body.theme-light .credit-progress-wrap {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+/* High contrast bottom navigation in light mode */
+body.theme-light .bottom-nav {
+  background: #ffffff;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.04);
+}
+body.theme-light .nav-item {
+  color: #475569;
+  font-weight: 600;
+}
+body.theme-light .nav-item.active {
+  color: #0284c7;
+  background: rgba(2, 132, 199, 0.08);
+  font-weight: 700;
+}
+
+/* High contrast mode toggles in light mode */
+body.theme-light .view-mode-toggle {
+  background: rgba(15, 23, 42, 0.05);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+body.theme-light .mode-pill {
+  color: #334155;
+  font-weight: 600;
+}
+body.theme-light .mode-pill.active {
+  background: #0284c7;
+  color: #ffffff;
+}
+
+/* Form inputs & selects in light mode */
+body.theme-light .form-input,
+body.theme-light .form-select {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
+}
+body.theme-light .form-input:focus,
+body.theme-light .form-select:focus {
+  border-color: #0284c7;
+  background: #ffffff;
+}
+
+/* Currency badge & refresh button in light mode */
+body.theme-light .currency-badge {
+  background: rgba(2, 132, 199, 0.08);
+  color: #0284c7;
+  font-weight: 700;
+}
+body.theme-light .refresh-btn {
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+}
+
+/* Legend items in light mode */
+body.theme-light .legend-item {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+/* Family Screen elements in light mode */
+body.theme-light .invite-box {
+  background: #f8fafc;
+  border: 1px dashed rgba(2, 132, 199, 0.4);
+}
+body.theme-light .invite-label {
+  color: #0284c7;
+  font-weight: 700;
+}
+body.theme-light .invite-input {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
+}
+body.theme-light .family-rules-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+body.theme-light .rule-text {
+  color: #334155;
+}
+body.theme-light .rule-text b {
+  color: #0f172a;
 }
 
