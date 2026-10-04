@@ -105,6 +105,90 @@ DEFAULT_FEW_SHOTS = [
         },
         "priority": 80,
     },
+    {
+        "domain_tag": "repair",
+        "raw_query": "гвозди и гофра для ванной 4500",
+        "expected_payload": {
+            "is_financial": True,
+            "items": [{
+                "item_name": "Гвозди и гофра для ванной",
+                "amount": 4500,
+                "type": "expense",
+                "category": "Ремонт"
+            }]
+        },
+        "priority": 85,
+    },
+    {
+        "domain_tag": "repair",
+        "raw_query": "вызов мастера сантехника 15000",
+        "expected_payload": {
+            "is_financial": True,
+            "items": [{
+                "item_name": "Вызов мастера сантехника",
+                "amount": 15000,
+                "type": "expense",
+                "category": "Ремонт"
+            }]
+        },
+        "priority": 85,
+    },
+    {
+        "domain_tag": "repair",
+        "raw_query": "снос стены и покраска 80000",
+        "expected_payload": {
+            "is_financial": True,
+            "items": [{
+                "item_name": "Снос стены и покраска",
+                "amount": 80000,
+                "type": "expense",
+                "category": "Ремонт"
+            }]
+        },
+        "priority": 85,
+    },
+    {
+        "domain_tag": "shopping",
+        "raw_query": "купил футболку 8000",
+        "expected_payload": {
+            "is_financial": True,
+            "items": [{
+                "item_name": "Футболка",
+                "amount": 8000,
+                "type": "expense",
+                "category": "Шоппинг"
+            }]
+        },
+        "priority": 85,
+    },
+    {
+        "domain_tag": "shopping",
+        "raw_query": "книги и игра в стиме 12000",
+        "expected_payload": {
+            "is_financial": True,
+            "items": [{
+                "item_name": "Книги и игра в стиме",
+                "amount": 12000,
+                "type": "expense",
+                "category": "Шоппинг"
+            }]
+        },
+        "priority": 85,
+    },
+    {
+        "domain_tag": "misc",
+        "raw_query": "оплатил штраф 10000",
+        "expected_payload": {
+            "is_financial": True,
+            "items": [{
+                "item_name": "Штраф",
+                "amount": 10000,
+                "type": "expense",
+                "category": "Прочее"
+            }]
+        },
+        "priority": 80,
+    },
 ]
 
 
@@ -113,22 +197,25 @@ class DynamicContextService:
         self.session = session
 
     async def seed_default_few_shots(self) -> None:
-        """Seed default few-shots idempotently."""
-        existing_count = await self.session.scalar(select(DynamicFewShot.id).limit(1))
-        if existing_count is not None:
-            return
+        """Seed default few-shots idempotently by raw_query."""
+        existing_res = await self.session.scalars(select(DynamicFewShot.raw_query))
+        existing_queries = {q.strip().lower() for q in existing_res.all()}
 
-        for item in DEFAULT_FEW_SHOTS:
-            few_shot = DynamicFewShot(
+        to_add = [
+            DynamicFewShot(
                 domain_tag=item["domain_tag"],
                 raw_query=item["raw_query"],
                 expected_payload=item["expected_payload"],
                 priority=item["priority"],
                 is_active=True,
             )
-            self.session.add(few_shot)
-        await self.session.commit()
-        logger.info("Dynamic few-shots successfully seeded.")
+            for item in DEFAULT_FEW_SHOTS
+            if item["raw_query"].strip().lower() not in existing_queries
+        ]
+        if to_add:
+            self.session.add_all(to_add)
+            await self.session.commit()
+            logger.info("Dynamic few-shots successfully seeded: %d added", len(to_add))
 
     async def sanitize_poisoned_aliases(self) -> None:
         """Clean up previously poisoned aliases (e.g. debt return wrongly recorded as expense)."""
@@ -152,6 +239,12 @@ class DynamicContextService:
             tags.append("transfer")
         if any(w in t for w in ["манты", "пельмени", "плов", "шашлык", "мясо", "сыр", "колбаса"]):
             tags.append("food")
+        if any(w in t for w in ["ремонт", "гвозд", "гофр", "смесител", "мастер", "сантехник", "краск", "обои", "снос", "шпаклевк", "плитк", "стройматериал"]):
+            tags.append("repair")
+        if any(w in t for w in ["футболк", "одежд", "кроссовк", "обув", "книг", "игр", "куртк", "джинс", "плать", "рубашк", "шоппинг", "шопинг", "стим", "steam"]):
+            tags.append("shopping")
+        if any(w in t for w in ["штраф", "пошлин", "госпошлин", "нотариус", "комисси"]):
+            tags.append("misc")
 
         query = select(DynamicFewShot).where(DynamicFewShot.is_active == True)
         if tags:
