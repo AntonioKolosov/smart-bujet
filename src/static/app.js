@@ -238,6 +238,16 @@
     return headers;
   }
 
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   function formatMoney(amount, curr = null) {
     const num = Number(amount) || 0;
     const sym = curr ? (CURRENCY_SYMBOLS[curr] || curr) : currencySymbol;
@@ -771,16 +781,6 @@
   });
 
   // --- Credits Logic ---
-  function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
   async function fetchCredits() {
     if (creditsLoaderEl) creditsLoaderEl.classList.remove('hidden');
     if (creditsEmptyEl) creditsEmptyEl.classList.add('hidden');
@@ -1366,14 +1366,17 @@
     (members || []).forEach(m => {
       const card = document.createElement('div');
       card.className = `member-card ${m.is_current_user ? 'self' : 'partner'}`;
+      const safeName = escapeHtml(m.first_name || 'Участник');
+      const badgeText = m.is_current_user ? 'Вы' : 'Партнёр';
+      const safeCurr = escapeHtml(m.currency || defaultCurr);
       card.innerHTML = `
         <div class="member-header">
-          <span class="member-name">${m.first_name || 'Участник'}</span>
-          <span class="member-badge">${m.is_current_user ? 'Вы' : 'Партнёр'}</span>
+          <span class="member-name">${safeName}</span>
+          <span class="member-badge">${badgeText}</span>
         </div>
-        <div class="member-balance">${formatMoney(m.current_balance, m.currency || defaultCurr)}</div>
+        <div class="member-balance">${formatMoney(m.current_balance, safeCurr)}</div>
         <div class="member-stats">
-          <span>Расход: <b>${formatMoney(m.month_expense, m.currency || defaultCurr)}</b></span>
+          <span>Расход: <b>${formatMoney(m.month_expense, safeCurr)}</b></span>
         </div>
       `;
       familyMembersGridEl.appendChild(card);
@@ -1411,16 +1414,19 @@
       el.className = 'tx-item';
       const isInc = tx.type === 'income';
       const authorClass = tx.is_current_user ? 'author-self' : 'author-partner';
+      const safeTitle = escapeHtml(tx.item_name || tx.category_name || 'Операция');
+      const safeAuthor = escapeHtml(tx.author_name || (tx.is_current_user ? 'Вы' : 'Партнёр'));
+      const safeCat = escapeHtml(tx.category_name || '');
 
       el.innerHTML = `
         <div class="tx-main">
           <div class="tx-top-row">
-            <span class="tx-title">${tx.item_name || tx.category_name || 'Операция'}</span>
-            <span class="author-tag ${authorClass}">${tx.author_name}</span>
+            <span class="tx-title">${safeTitle}</span>
+            <span class="author-tag ${authorClass}">${safeAuthor}</span>
           </div>
           <div class="tx-sub-row">
             <span class="tx-date">${formatDateGroup(tx.transaction_date)} • ${formatTime(tx.transaction_date)}</span>
-            <span class="tx-cat-chip">${tx.category_name || ''}</span>
+            <span class="tx-cat-chip">${safeCat}</span>
           </div>
         </div>
         <div class="tx-amount ${isInc ? 'income' : 'expense'}">

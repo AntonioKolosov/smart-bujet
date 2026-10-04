@@ -21,6 +21,7 @@ async def list_transactions(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    service = TransactionService(session)
     conditions = [Transaction.user_id == current_user.id]
     if include_family and current_user.family_group_id:
         conditions = [or_(
@@ -37,7 +38,8 @@ async def list_transactions(
         .limit(limit)
     )
     result = await session.scalars(query)
-    return result.all()
+    txs = result.unique().all()
+    return [service.mask_transaction_for_viewer(tx, current_user.id) for tx in txs]
 
 @router.post("/", response_model=TransactionRead)
 async def create_transaction(
@@ -45,23 +47,8 @@ async def create_transaction(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    tx = Transaction(
-        user_id=current_user.id,
-        family_group_id=current_user.family_group_id,
-        category_id=data.category_id,
-        amount=float(data.amount),
-        type=CategoryType(data.type),
-        item_name=data.item_name,
-        raw_text=data.raw_text,
-        source=TransactionSource(data.source) if data.source in TransactionSource._value2member_map_ else TransactionSource.manual
-    )
-    if data.transaction_date:
-        tx.transaction_date = data.transaction_date
-
-    session.add(tx)
-    await session.commit()
-    await session.refresh(tx)
-    return tx
+    service = TransactionService(session)
+    return await service.create_manual_transaction(current_user, data)
 
 @router.patch("/{tx_id}", response_model=TransactionRead)
 async def update_transaction(

@@ -16,7 +16,7 @@ from src.models.transaction import Transaction, TransactionSource
 from src.models.alias import UserItemAlias
 from src.models.asset import AssetAccount, AssetType
 from src.models.credit import CreditAccount
-from src.schemas.transaction import TransactionUpdate
+from src.schemas.transaction import TransactionCreate, TransactionUpdate
 from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError, OffTopicMessageError
 from src.services.parser_service import ParserService
 from src.services.category_service import CategoryService
@@ -1029,5 +1029,106 @@ class TransactionService:
         # 4. Clean deletion of primary transaction
         await self.session.delete(tx)
         await self.session.commit()
+
+    @staticmethod
+    def mask_transaction_for_viewer(tx: Transaction, viewer_user_id: int) -> dict[str, Any]:
+        """
+        Applies unified privacy masking: hides customized deposit/asset names
+        and raw prompts from other family members across all API responses.
+        """
+        is_owner = (tx.user_id == viewer_user_id)
+        cat_name = tx.category.name if tx.category else None
+        item_name = tx.item_name or cat_name or "Операция"
+        raw_text = tx.raw_text if is_owner else None
+
+        if not is_owner:
+            is_deposit_op = (
+                tx.asset_account_id is not None
+                or (cat_name and any(k in cat_name.lower() for k in ["депозит", "вклад", "копилк", "накоплен"]))
+                or any(k in item_name.lower() for k in ["депозит", "вклад", "копилк", "накоплен", "процент"])
+            )
+            if is_deposit_op:
+                if "процент" in item_name.lower() or (cat_name and "процент" in cat_name.lower()):
+                    item_name = "Проценты по вкладу"
+                    cat_name = "Проценты по вкладу"
+                elif tx.type in (CategoryType.transfer_out, CategoryType.expense):
+                    item_name = "Пополнение депозита"
+                    cat_name = "Депозит и вклады"
+                else:
+                    item_name = "Снятие с депозита"
+                    cat_name = "Снятие с депозита"
+
+        return {
+            "id": tx.id,
+            "user_id": tx.user_id,
+            "family_group_id": tx.family_group_id,
+            "category_id": tx.category_id,
+            "category_name": cat_name,
+            "amount": Decimal(str(tx.amount)),
+            "original_amount": Decimal(str(tx.original_amount)) if tx.original_amount is not None else None,
+            "discount_amount": Decimal(str(tx.discount_amount)) if tx.discount_amount is not None else None,
+            "type": tx.type.value if hasattr(tx.type, "value") else str(tx.type),
+            "item_name": item_name,
+            "raw_text": raw_text,
+            "source": tx.source.value if hasattr(tx.source, "value") else str(tx.source),
+            "transaction_date": tx.transaction_date,
+        }
+
+    async def create_manual_transaction(
+        self,
+        user: User,
+        data: TransactionCreate
+    ) -> dict[str, Any]:
+        """
+        Safely creates a manual transaction via API with complete business validations.
+        """
+        # 1. Initial balance / onboarding guard
+        if user.initial_balance is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Пожалуйста, сначала укажите начальный баланс."
+            )
+
+        # 2. Category existence and ownership check
+        cat_query = select(Category).where(Category.id == data.category_id)
+        category = await self.session.scalar(cat_query)
+        if not category:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Указанная категория не найдена"
+            )
+        if not category.is_system and category.user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Вы не можете использовать категорию другого пользователя"
+            )
+
+        # 3. Category type compatibility
+        tx_type = CategoryType(data.type)
+        if category.type != tx_type:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Тип категории ({category.type.value}) не соответствует типу операции ({tx_type.value})"
+            )
+
+        # 4. Construct and persist transaction
+        tx = Transaction(
+            user_id=user.id,
+            family_group_id=user.family_group_id,
+            category_id=category.id,
+            amount=float(data.amount),
+            type=tx_type,
+            item_name=data.item_name.strip() if data.item_name else category.name,
+            raw_text=data.raw_text,
+            source=TransactionSource.manual,
+            transaction_date=data.transaction_date or datetime.now(timezone.utc)
+        )
+        self.session.add(tx)
+        await self.session.flush()
+        await self.session.refresh(tx)
+        tx.category = category
+        await self.session.commit()
+
+        return self.mask_transaction_for_viewer(tx, user.id)
 
 

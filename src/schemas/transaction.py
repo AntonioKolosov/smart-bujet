@@ -1,16 +1,25 @@
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from decimal import Decimal
 from datetime import datetime
 from uuid import UUID
+from src.models.category import CategoryType
 
 class TransactionCreate(BaseModel):
-    amount: Decimal
+    amount: Decimal = Field(..., gt=Decimal("0"), description="Сумма должна быть строго больше 0")
     category_id: int
     item_name: str | None = None
     type: str = "expense"
     raw_text: str | None = None
     source: str = "manual"
     transaction_date: datetime | None = None
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        valid_types = {t.value for t in CategoryType}
+        if v not in valid_types:
+            raise ValueError(f"Недопустимый тип операции: {v}")
+        return v
 
 class TransactionUpdate(BaseModel):
     amount: Decimal | None = None

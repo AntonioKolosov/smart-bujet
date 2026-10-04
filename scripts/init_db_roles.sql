@@ -3,7 +3,7 @@ DECLARE
     readonly_password text := current_setting('custom.mcp_readonly_password', true);
 BEGIN
     IF readonly_password IS NULL OR readonly_password = '' THEN
-        readonly_password := 'readonly_pass'; -- Fallback to default
+        RAISE EXCEPTION 'custom.mcp_readonly_password must be explicitly defined!';
     END IF;
 
     -- Create role mcp_readonly if it does not exist

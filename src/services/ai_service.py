@@ -55,13 +55,18 @@ def normalize_receipt_payload(raw_text: str) -> dict[str, Any]:
                 break
         if not items and "item_name" in data:
             items = [data]
-        return {
+        payload = {
             "is_financial": True,
             "items": items,
             "discount_percent": data.get("discount_percent"),
             "discount_amount": data.get("discount_amount"),
             "total_paid": data.get("total_paid"),
         }
+        if "establishment_type" in data:
+            payload["establishment_type"] = data["establishment_type"]
+        if "venue_name" in data:
+            payload["venue_name"] = data["venue_name"]
+        return payload
     return {"is_financial": True, "items": []}
 
 

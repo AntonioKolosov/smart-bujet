@@ -3,6 +3,7 @@ import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.transaction import Transaction
@@ -28,13 +29,26 @@ async def handle_tx_toggle(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("❌ Некорректный ID транзакции", show_alert=True)
         return
 
-    tx = await session.get(Transaction, tx_id)
+    query = (
+        select(Transaction)
+        .options(joinedload(Transaction.category))
+        .where(Transaction.id == tx_id)
+    )
+    tx = await session.scalar(query)
     if not tx:
         await callback.answer("❌ Транзакция не найдена", show_alert=True)
         return
 
     if tx.user_id != callback.from_user.id:
         await callback.answer("⛔ Вы можете изменять только свои транзакции", show_alert=True)
+        return
+
+    # Защитный барьер: запрет переключения для связанных операций (переводы, депозиты, кредиты)
+    if tx.related_transaction_id or tx.credit_account_id or tx.asset_account_id:
+        await callback.answer(
+            "⚠️ Переключение типа недоступно для переводов, депозитов и кредитов. При необходимости отредактируйте операцию в MiniApp.",
+            show_alert=True
+        )
         return
 
     old_type = tx.type

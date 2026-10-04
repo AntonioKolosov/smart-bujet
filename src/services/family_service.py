@@ -132,7 +132,9 @@ class FamilyService:
         ) or 0
 
         consolidated_month_expense = max(0.0, combined_month_expense - float(intra_family_expense))
-        consolidated_month_income = max(0.0, combined_month_income - float(intra_family_income))
+        # Note: get_user_balance() already excludes intra-family transfers from each member's month_income,
+        # so combined_month_income already contains only external income.
+        consolidated_month_income = max(0.0, combined_month_income)
 
         return {
             "group_id": group.id,
