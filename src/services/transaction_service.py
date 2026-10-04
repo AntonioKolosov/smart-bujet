@@ -925,3 +925,109 @@ class TransactionService:
         await self.session.refresh(tx)
         return tx
 
+    async def delete_transaction(
+        self,
+        user_id: int,
+        tx_id: uuid.UUID,
+    ) -> None:
+        """
+        Atomically deletes a transaction and reconciles all dependent ledgers:
+        1. Validates strict user ownership (tx.user_id == user_id).
+        2. Reconciles AssetAccount balance (transfer_out / transfer_in / capitalized interest).
+        3. Reconciles CreditAccount debt balance & restores active status (expense repayments).
+        4. Safely breaks circular references and cascade-deletes intra-family mirror transactions.
+        5. Deletes the primary transaction record within an ACID transaction boundary.
+        """
+        query = (
+            select(Transaction)
+            .where(Transaction.id == tx_id)
+            .with_for_update()
+        )
+        tx = await self.session.scalar(query)
+        if not tx:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Транзакция не найдена"
+            )
+
+        if tx.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Вы можете удалять только собственные транзакции"
+            )
+
+        # 1. Ledger Reconciliation: Asset Account
+        if tx.asset_account_id:
+            asset = await self.session.get(
+                AssetAccount,
+                tx.asset_account_id,
+                with_for_update=True
+            )
+            if asset:
+                delta = Decimal(str(tx.asset_amount if tx.asset_amount is not None else tx.amount))
+                curr_asset_bal = Decimal(str(asset.balance or 0))
+
+                if tx.type == CategoryType.transfer_out:
+                    # Пополнение депозита отменяется -> баланс вклада уменьшается
+                    asset.balance = float(curr_asset_bal - delta)
+                elif tx.type == CategoryType.transfer_in:
+                    # Снятие с депозита отменяется -> баланс вклада восстанавливается
+                    asset.balance = float(curr_asset_bal + delta)
+                elif tx.type == CategoryType.income:
+                    # Начисленные проценты отменяются -> баланс вклада уменьшается
+                    asset.balance = float(curr_asset_bal - Decimal(str(tx.amount)))
+
+        # 2. Ledger Reconciliation: Credit Account
+        if tx.credit_account_id:
+            credit = await self.session.get(
+                CreditAccount,
+                tx.credit_account_id,
+                with_for_update=True
+            )
+            if credit:
+                if tx.type == CategoryType.expense:
+                    # Откат платежа по кредиту: долг увеличивается, кредит возобновляется
+                    payment_amt = Decimal(str(tx.amount))
+                    curr_rem = Decimal(str(credit.remaining_amount or 0))
+                    new_remaining = curr_rem + payment_amt
+                    credit.remaining_amount = new_remaining
+
+                    if new_remaining > Decimal("0.0"):
+                        credit.is_active = True
+                        credit.closed_at = None
+
+                elif tx.type == CategoryType.income:
+                    # Откат взятия кредита: проверяем отсутствие платежей
+                    repayments_count = await self.session.scalar(
+                        select(func.count(Transaction.id)).where(
+                            Transaction.credit_account_id == tx.credit_account_id,
+                            Transaction.id != tx.id
+                        )
+                    )
+                    if repayments_count and repayments_count > 0:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Невозможно удалить операцию получения кредита, по которому уже зафиксированы платежи погашения"
+                        )
+                    await self.session.delete(credit)
+
+        # 3. Intra-Family Mirror Transaction Rollback
+        if tx.related_transaction_id:
+            mirror_query = (
+                select(Transaction)
+                .where(Transaction.id == tx.related_transaction_id)
+                .with_for_update()
+            )
+            mirror_tx = await self.session.scalar(mirror_query)
+            if mirror_tx:
+                # Разрываем взаимные ссылки во избежание CircularDependencyError в SQLAlchemy
+                tx.related_transaction_id = None
+                mirror_tx.related_transaction_id = None
+                await self.session.flush()
+                await self.session.delete(mirror_tx)
+
+        # 4. Clean deletion of primary transaction
+        await self.session.delete(tx)
+        await self.session.commit()
+
+

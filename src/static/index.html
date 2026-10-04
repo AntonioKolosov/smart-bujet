@@ -6,7 +6,7 @@
   <title>Smart Bujet — Журнал и Депозиты</title>
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="/static/styles.css?v=2.7">
+  <link rel="stylesheet" href="/static/styles.css?v=2.8">
 </head>
 <body>
   <div id="app" class="container">
@@ -425,12 +425,13 @@
     <div class="modal-content">
       <div class="modal-header">
         <h3 class="modal-title">Редактировать операцию</h3>
-        <button id="closeEditTxModalBtn" class="close-btn">&times;</button>
+        <button id="closeEditTxModalBtn" class="close-btn" aria-label="Закрыть">&times;</button>
       </div>
       <form id="editTxForm" class="modal-form">
         <div id="editTxModalError" class="error-banner hidden" style="margin-bottom: 0;"></div>
         <input type="hidden" id="editTxId" />
         <input type="hidden" id="editTxType" />
+        <input type="hidden" id="editTxCategoryValue" />
 
         <!-- Контекстное превью операции -->
         <div class="edit-tx-card-preview">
@@ -446,18 +447,57 @@
           <input type="number" step="0.01" min="0.01" id="editTxAmount" class="form-input" placeholder="0" required inputmode="decimal" />
         </label>
 
-        <label class="form-label">
+        <!-- Кастомный триггер выбора категории -->
+        <div class="form-label">
           <span class="form-label-title">Категория</span>
-          <select id="editTxCategorySelect" class="form-select" required>
-            <!-- Наполняется динамически -->
-          </select>
-        </label>
+          <div id="categoryPickerTrigger" class="category-picker-trigger" tabindex="0" role="button" aria-haspopup="dialog">
+            <div class="category-trigger-left">
+              <span id="selectedCategoryDot" class="category-color-dot"></span>
+              <span id="selectedCategoryIcon" class="category-trigger-icon">🏷️</span>
+              <span id="selectedCategoryName" class="category-trigger-name">Выберите категорию</span>
+            </div>
+            <span class="category-trigger-arrow">▾</span>
+          </div>
+        </div>
 
+        <!-- Кнопки действий: Отмена и Сохранить -->
         <div class="modal-actions-row">
           <button type="button" id="cancelEditTxBtn" class="secondary-btn-modal">Отмена</button>
           <button type="submit" id="saveEditTxBtn" class="modal-submit-btn">Сохранить</button>
         </div>
+
+        <!-- Кнопка удаления операции (Danger Action) -->
+        <div class="modal-danger-row">
+          <button type="button" id="deleteEditTxBtn" class="danger-btn-modal">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              <line x1="10" y1="11" x2="10" y2="17"></line>
+              <line x1="14" y1="11" x2="14" y2="17"></line>
+            </svg>
+            Удалить операцию
+          </button>
+        </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Category Picker Bottom Sheet (Шторка выбора категорий) -->
+  <div id="categorySheetOverlay" class="sheet-overlay hidden">
+    <div id="categorySheetContainer" class="sheet-container">
+      <div class="sheet-handle-bar">
+        <div class="sheet-drag-handle"></div>
+      </div>
+      <div class="sheet-header">
+        <h3 class="sheet-title">Выбор категории</h3>
+        <button id="closeCategorySheetBtn" class="close-btn" aria-label="Закрыть">&times;</button>
+      </div>
+      <div class="sheet-search-wrap">
+        <input type="text" id="categorySearchInput" class="sheet-search-input" placeholder="🔍 Найти категорию..." />
+      </div>
+      <div id="categorySheetList" class="category-sheet-grid">
+        <!-- Наполняется динамически -->
+      </div>
     </div>
   </div>
 
@@ -481,6 +521,6 @@
     </button>
   </nav>
 
-  <script src="/static/app.js?v=2.7"></script>
+  <script src="/static/app.js?v=2.8"></script>
 </body>
 </html>

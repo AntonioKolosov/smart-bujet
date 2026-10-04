@@ -203,7 +203,7 @@
   const repayCreditAmountInput = document.getElementById('repayCreditAmountInput');
   const repayCreditModalErrorEl = document.getElementById('repayCreditModalError');
 
-  // DOM Elements - Edit Transaction Modal
+  // DOM Elements - Edit Transaction Modal & Category Picker Sheet
   const editTxModal = document.getElementById('editTxModal');
   const closeEditTxModalBtn = document.getElementById('closeEditTxModalBtn');
   const cancelEditTxBtn = document.getElementById('cancelEditTxBtn');
@@ -211,13 +211,24 @@
   const editTxModalError = document.getElementById('editTxModalError');
   const editTxIdInput = document.getElementById('editTxId');
   const editTxTypeInput = document.getElementById('editTxType');
+  const editTxCategoryValue = document.getElementById('editTxCategoryValue');
   const editTxTitleDisplay = document.getElementById('editTxTitleDisplay');
   const editTxDateDisplay = document.getElementById('editTxDateDisplay');
   const editTxTypeBadge = document.getElementById('editTxTypeBadge');
   const editTxCurrencyLabel = document.getElementById('editTxCurrencyLabel');
   const editTxAmount = document.getElementById('editTxAmount');
-  const editTxCategorySelect = document.getElementById('editTxCategorySelect');
   const saveEditTxBtn = document.getElementById('saveEditTxBtn');
+  const deleteEditTxBtn = document.getElementById('deleteEditTxBtn');
+
+  // Category Picker Sheet Elements
+  const categoryPickerTrigger = document.getElementById('categoryPickerTrigger');
+  const selectedCategoryDot = document.getElementById('selectedCategoryDot');
+  const selectedCategoryIcon = document.getElementById('selectedCategoryIcon');
+  const selectedCategoryName = document.getElementById('selectedCategoryName');
+  const categorySheetOverlay = document.getElementById('categorySheetOverlay');
+  const closeCategorySheetBtn = document.getElementById('closeCategorySheetBtn');
+  const categorySearchInput = document.getElementById('categorySearchInput');
+  const categorySheetList = document.getElementById('categorySheetList');
 
   function getHeaders() {
     const headers = { 'Content-Type': 'application/json' };
@@ -1001,8 +1012,98 @@
     });
   }
 
-  // --- Category Caching & Edit Transaction Modal ---
+  // --- Category UI Meta (Синхронизировано с бэкендом) ---
+  const CATEGORY_META = {
+    'Еда вне дома': { icon: '🍽️', color: '#f97316' },
+    'Продукты': { icon: '🛒', color: '#22c55e' },
+    'Транспорт': { icon: '🚕', color: '#38bdf8' },
+    'Развлечения': { icon: '🎉', color: '#a855f7' },
+    'Здоровье': { icon: '💊', color: '#ec4899' },
+    'Обязательные расходы': { icon: '⚡', color: '#eab308' },
+    'Подписки': { icon: '📱', color: '#6366f1' },
+    'Ребёнок': { icon: '👶', color: '#14b8a6' },
+    'Питомец': { icon: '🐾', color: '#84cc16' },
+    'Образование': { icon: '📚', color: '#06b6d4' },
+    'Подарок': { icon: '🎁', color: '#f43f5e' },
+    'Ремонт': { icon: '🛠️', color: '#f59e0b' },
+    'Шоппинг': { icon: '🛍️', color: '#d946ef' },
+    'Прочее': { icon: '📦', color: '#94a3b8' },
+    'Погашение кредита': { icon: '💳', color: '#ef4444' },
+    'Денежный перевод': { icon: '💸', color: '#8b5cf6' },
+    'Зарплата': { icon: '💰', color: '#10b981' },
+    'Проценты по вкладу': { icon: '📈', color: '#3b82f6' }
+  };
+
+  function getCategoryMeta(name) {
+    return CATEGORY_META[name] || { icon: '🏷️', color: '#38bdf8' };
+  }
+
+  // --- Category Caching & Custom Bottom Sheet Category Picker ---
   const cachedCategoriesByType = {};
+  let currentModalCategories = [];
+
+  function setCategoryPickerSelection(catId, catName) {
+    if (editTxCategoryValue) editTxCategoryValue.value = catId || '';
+    if (selectedCategoryName) selectedCategoryName.textContent = catName || 'Выберите категорию';
+    const meta = getCategoryMeta(catName);
+    if (selectedCategoryIcon) selectedCategoryIcon.textContent = meta.icon;
+    if (selectedCategoryDot) selectedCategoryDot.style.backgroundColor = meta.color;
+  }
+
+  function openCategorySheet() {
+    if (!categorySheetOverlay) return;
+    renderCategorySheetList(currentModalCategories);
+    if (categorySearchInput) categorySearchInput.value = '';
+    categorySheetOverlay.classList.remove('hidden');
+    if (categorySearchInput) setTimeout(() => categorySearchInput.focus(), 80);
+  }
+
+  function closeCategorySheet() {
+    if (!categorySheetOverlay) return;
+    categorySheetOverlay.classList.add('hidden');
+  }
+
+  function renderCategorySheetList(categories) {
+    if (!categorySheetList) return;
+    categorySheetList.innerHTML = '';
+    const selectedId = Number(editTxCategoryValue?.value);
+
+    categories.forEach(cat => {
+      const meta = getCategoryMeta(cat.name);
+      const isSelected = cat.id === selectedId;
+      const item = document.createElement('div');
+      item.className = `category-sheet-item ${isSelected ? 'selected' : ''}`;
+      item.innerHTML = `
+        <span class="sheet-item-icon">${meta.icon}</span>
+        <span class="sheet-item-name">${escapeHtml(cat.name)}</span>
+        ${isSelected ? '<span class="sheet-item-check">✓</span>' : ''}
+      `;
+      item.addEventListener('click', () => {
+        if (tg?.HapticFeedback?.selectionChanged) {
+          tg.HapticFeedback.selectionChanged();
+        }
+        setCategoryPickerSelection(cat.id, cat.name);
+        closeCategorySheet();
+      });
+      categorySheetList.appendChild(item);
+    });
+  }
+
+  if (categorySearchInput) {
+    categorySearchInput.addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase().trim();
+      const filtered = currentModalCategories.filter(c => c.name.toLowerCase().includes(q));
+      renderCategorySheetList(filtered);
+    });
+  }
+
+  if (categoryPickerTrigger) categoryPickerTrigger.addEventListener('click', openCategorySheet);
+  if (closeCategorySheetBtn) closeCategorySheetBtn.addEventListener('click', closeCategorySheet);
+  if (categorySheetOverlay) {
+    categorySheetOverlay.addEventListener('click', (e) => {
+      if (e.target === categorySheetOverlay) closeCategorySheet();
+    });
+  }
 
   async function fetchCategories(type) {
     const normType = type === 'income' ? 'income' : 'expense';
@@ -1039,20 +1140,15 @@
     }
 
     editTxAmount.value = parseFloat(tx.amount).toFixed(2);
+    setCategoryPickerSelection(tx.category_id, tx.category_name);
 
     try {
       const categories = await fetchCategories(tx.type);
-      editTxCategorySelect.innerHTML = categories
-        .map(c => `<option value="${c.id}" ${c.id === tx.category_id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`)
-        .join('');
+      currentModalCategories = [...categories];
 
       // If current category is not in the list, prepend it
-      if (tx.category_id && !categories.some(c => c.id === tx.category_id) && tx.category_name) {
-        const opt = document.createElement('option');
-        opt.value = tx.category_id;
-        opt.textContent = escapeHtml(tx.category_name);
-        opt.selected = true;
-        editTxCategorySelect.prepend(opt);
+      if (tx.category_id && !currentModalCategories.some(c => c.id === tx.category_id) && tx.category_name) {
+        currentModalCategories.unshift({ id: tx.category_id, name: tx.category_name });
       }
     } catch (e) {
       if (editTxModalError) {
@@ -1069,6 +1165,7 @@
     if (!editTxModal) return;
     editTxModal.classList.add('hidden');
     editTxForm?.reset();
+    closeCategorySheet();
   }
 
   if (closeEditTxModalBtn) closeEditTxModalBtn.addEventListener('click', closeEditModal);
@@ -1079,12 +1176,21 @@
     });
   }
 
+  // Универсальное закрытие ВСЕХ модальных окон по клику на фон
+  [addAssetModal, actionModal, addCreditModal, repayCreditModal].forEach(modalEl => {
+    if (modalEl) {
+      modalEl.addEventListener('click', (e) => {
+        if (e.target === modalEl) modalEl.classList.add('hidden');
+      });
+    }
+  });
+
   if (editTxForm) {
     editTxForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const txId = editTxIdInput.value;
       const amountVal = parseFloat(editTxAmount.value);
-      const catIdVal = parseInt(editTxCategorySelect.value, 10);
+      const catIdVal = parseInt(editTxCategoryValue.value, 10);
 
       if (isNaN(amountVal) || amountVal <= 0) {
         if (editTxModalError) {
@@ -1133,6 +1239,66 @@
           saveEditTxBtn.disabled = false;
           saveEditTxBtn.textContent = 'Сохранить';
         }
+      }
+    });
+  }
+
+  // --- Логика удаления транзакции ---
+  if (deleteEditTxBtn) {
+    deleteEditTxBtn.addEventListener('click', async () => {
+      const txId = editTxIdInput.value;
+      if (!txId) return;
+
+      const confirmPrompt = 'Вы уверены, что хотите удалить эту операцию? Это действие необратимо.';
+
+      const proceedDelete = async () => {
+        deleteEditTxBtn.disabled = true;
+        const originalHtml = deleteEditTxBtn.innerHTML;
+        deleteEditTxBtn.innerHTML = '<span>Удаление...</span>';
+        if (editTxModalError) editTxModalError.classList.add('hidden');
+
+        try {
+          const res = await fetch(`/api/v1/transactions/${txId}`, {
+            method: 'DELETE',
+            headers: getHeaders()
+          });
+
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || `Ошибка удаления (${res.status})`);
+          }
+
+          if (tg?.HapticFeedback?.notificationOccurred) {
+            tg.HapticFeedback.notificationOccurred('success');
+          }
+
+          closeEditModal();
+          await Promise.all([fetchTransactions(), fetchProfile()]);
+        } catch (err) {
+          if (editTxModalError) {
+            editTxModalError.textContent = err.message || 'Не удалось удалить операцию';
+            editTxModalError.classList.remove('hidden');
+          }
+          if (tg?.HapticFeedback?.notificationOccurred) {
+            tg.HapticFeedback.notificationOccurred('error');
+          }
+        } finally {
+          deleteEditTxBtn.disabled = false;
+          deleteEditTxBtn.innerHTML = originalHtml;
+        }
+      };
+
+      if (tg?.showConfirm) {
+        tg.showConfirm(confirmPrompt, (confirmed) => {
+          if (confirmed) {
+            if (tg?.HapticFeedback?.impactOccurred) {
+              tg.HapticFeedback.impactOccurred('medium');
+            }
+            proceedDelete();
+          }
+        });
+      } else if (window.confirm(confirmPrompt)) {
+        proceedDelete();
       }
     });
   }

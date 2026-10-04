@@ -77,3 +77,17 @@ async def update_transaction(
         data=data
     )
 
+@router.delete("/{tx_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_transaction(
+    tx_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    service = TransactionService(session)
+    await service.delete_transaction(
+        user_id=current_user.id,
+        tx_id=tx_id
+    )
+    return None
+
+
