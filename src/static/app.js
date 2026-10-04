@@ -199,6 +199,7 @@
     } else {
       if (tabOps) tabOps.classList.add('active');
       if (navOpsBtn) navOpsBtn.classList.add('active');
+      fetchTransactions();
     }
   }
 
@@ -1048,12 +1049,10 @@
     switchTab('tab-credits');
   } else if (initialPage === 'family' || initialPage === 'fam') {
     switchTab('tab-family');
+  } else {
+    switchTab('tab-operations');
   }
 
-  // Initial load profile and operations
-  fetchProfile().finally(() => {
-    if (!initialPage || initialPage === 'operations' || initialPage === 'ops') {
-      fetchTransactions();
-    }
-  });
+  // Always load user profile
+  fetchProfile();
 })();
