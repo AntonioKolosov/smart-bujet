@@ -116,11 +116,7 @@
   const analyticsCategoryPeriodEl = document.getElementById('analyticsCategoryPeriod');
   const donutChartContainer = document.getElementById('donutChartContainer');
   const categoryLegendList = document.getElementById('categoryLegendList');
-  const analyticsNetDeltaEl = document.getElementById('analyticsNetDelta');
-  const analyticsCushionRunwayEl = document.getElementById('analyticsCushionRunway');
-  const incomeExpenseChartContainer = document.getElementById('incomeExpenseChartContainer');
-  const cushionChartContainer = document.getElementById('cushionChartContainer');
-  const essentialChartContainer = document.getElementById('essentialChartContainer');
+  const barChartContainer = document.getElementById('barChartContainer');
 
   let currentOpsMode = 'personal';
   let currentAnalyticsMode = 'personal';
@@ -1530,26 +1526,11 @@
 
       // Key Metrics
       const metrics = monthData.metrics || {};
-      const cushion = monthData.cushion || null;
       if (analyticsMonthSpendEl) {
         analyticsMonthSpendEl.textContent = formatMoney(metrics.current_month_spend || 0);
       }
       if (analyticsAvgSpendEl) {
         analyticsAvgSpendEl.textContent = formatMoney(metrics.monthly_average_spend || 0);
-      }
-      if (analyticsNetDeltaEl) {
-        const net = Number(metrics.current_month_net_savings) || 0;
-        const sign = net > 0 ? '+' : '';
-        analyticsNetDeltaEl.textContent = `${sign}${formatMoney(net)}`;
-        analyticsNetDeltaEl.style.color = net >= 0 ? '#22c55e' : '#ef4444';
-      }
-      if (analyticsCushionRunwayEl) {
-        if (cushion && cushion.runway_months !== undefined) {
-          analyticsCushionRunwayEl.textContent = `${cushion.runway_months} мес.`;
-          analyticsCushionRunwayEl.style.color = cushion.runway_months >= 3 ? '#22c55e' : (cushion.runway_months >= 1 ? '#eab308' : '#ef4444');
-        } else {
-          analyticsCushionRunwayEl.textContent = '—';
-        }
       }
       if (analyticsTopCategoryEl) {
         if (metrics.top_category_name && Number(metrics.top_category_amount) > 0) {
@@ -1566,11 +1547,9 @@
         analyticsCategoryPeriodEl.textContent = catData.period_label;
       }
 
-      // Render All 4 Analytics Charts
-      renderIncomeExpenseChart(monthData.history || []);
-      renderCushionChart(monthData.history || [], cushion, metrics);
-      renderEssentialChart(monthData.history || []);
+      // Charts
       renderDonutChart(catData.categories || [], catData.total_spend || 0);
+      renderBarChart(monthData.history || []);
 
       analyticsContentEl?.classList.remove('hidden');
     } catch (err) {
@@ -1580,254 +1559,6 @@
       }
     } finally {
       analyticsLoaderEl?.classList.add('hidden');
-    }
-  }
-
-  // Chart 1: Grouped Bar (Income vs Expense) + Net Profit Line
-  function renderIncomeExpenseChart(history) {
-    if (!incomeExpenseChartContainer) return;
-    if (!history || history.length === 0) {
-      incomeExpenseChartContainer.innerHTML = '<div class="empty-banner"><p class="empty-title">Нет истории операций</p></div>';
-      return;
-    }
-
-    const isLight = document.body.classList.contains('theme-light');
-    const svgWidth = 340;
-    const svgHeight = 185;
-    const padTop = 26;
-    const padBottom = 26;
-    const padX = 14;
-    const availWidth = svgWidth - padX * 2;
-    const availHeight = svgHeight - padTop - padBottom;
-
-    const count = history.length;
-    const slotWidth = availWidth / count;
-    const barWidth = Math.min(13, Math.max(8, slotWidth * 0.28));
-
-    const maxCashflow = Math.max(
-      ...history.map(h => Math.max(Number(h.total_income) || 0, Number(h.total_expense) || 0)),
-      100
-    );
-
-    const labelColor = isLight ? '#334155' : '#94a3b8';
-    const baselineColor = isLight ? 'rgba(15, 23, 42, 0.12)' : 'rgba(255, 255, 255, 0.12)';
-    const zeroLineY = svgHeight - padBottom;
-
-    let barsSvg = '';
-    const linePoints = [];
-
-    history.forEach((item, idx) => {
-      const inc = Number(item.total_income) || 0;
-      const exp = Number(item.total_expense) || 0;
-      const net = Number(item.net_savings) || 0;
-
-      const incHeight = Math.max(inc > 0 ? 3 : 0, Math.round((inc / maxCashflow) * (availHeight - 14)));
-      const expHeight = Math.max(exp > 0 ? 3 : 0, Math.round((exp / maxCashflow) * (availHeight - 14)));
-
-      const slotCenter = padX + idx * slotWidth + slotWidth / 2;
-      const xInc = slotCenter - barWidth - 1.5;
-      const xExp = slotCenter + 1.5;
-
-      const yInc = zeroLineY - incHeight;
-      const yExp = zeroLineY - expHeight;
-
-      // Grouped bars
-      barsSvg += `
-        <g class="chart-group">
-          ${inc > 0 ? `<rect x="${xInc}" y="${yInc}" width="${barWidth}" height="${incHeight}" rx="3" fill="#22c55e" opacity="0.9" />` : ''}
-          ${exp > 0 ? `<rect x="${xExp}" y="${yExp}" width="${barWidth}" height="${expHeight}" rx="3" fill="#ef4444" opacity="0.9" />` : ''}
-          <text x="${slotCenter}" y="${svgHeight - 8}" text-anchor="middle" fill="${labelColor}" font-size="10" font-weight="600">${item.label || item.month}</text>
-        </g>
-      `;
-
-      // Net profit dot coordinates
-      const deltaNormalized = Math.max(-1, Math.min(1, net / maxCashflow));
-      const deltaY = Math.max(padTop + 8, Math.min(zeroLineY - 4, Math.round(zeroLineY - (deltaNormalized * 0.45 + 0.35) * availHeight)));
-      linePoints.push({ x: slotCenter, y: deltaY, net: net });
-    });
-
-    // Net profit line & markers
-    let pathD = '';
-    let dotsSvg = '';
-    linePoints.forEach((pt, i) => {
-      pathD += (i === 0 ? `M ${pt.x},${pt.y}` : ` L ${pt.x},${pt.y}`);
-      const dotColor = pt.net >= 0 ? '#38bdf8' : '#f87171';
-      const textSign = pt.net > 0 ? '+' : '';
-      dotsSvg += `
-        <circle cx="${pt.x}" cy="${pt.y}" r="3.5" fill="${dotColor}" stroke="${isLight ? '#ffffff' : '#0f172a'}" stroke-width="2" />
-        <text x="${pt.x}" y="${pt.y - 7}" text-anchor="middle" fill="${dotColor}" font-size="9" font-weight="700">${textSign}${formatCompact(pt.net)}</text>
-      `;
-    });
-
-    incomeExpenseChartContainer.innerHTML = `
-      <svg width="100%" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}" preserveAspectRatio="xMidYMid meet">
-        <line x1="${padX}" y1="${zeroLineY}" x2="${svgWidth - padX}" y2="${zeroLineY}" stroke="${baselineColor}" stroke-width="1" />
-        ${barsSvg}
-        <path d="${pathD}" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.95" />
-        ${dotsSvg}
-      </svg>
-    `;
-  }
-
-  // Chart 2: Cumulative Capital Curve & Safety Cushion
-  function renderCushionChart(history, cushion, metrics) {
-    if (!cushionChartContainer) return;
-    if (!history || history.length === 0) {
-      cushionChartContainer.innerHTML = '<div class="empty-banner"><p class="empty-title">Нет истории для расчета подушки</p></div>';
-      return;
-    }
-
-    const currentCushion = Number(cushion?.current_cushion) || 0;
-    const target3m = Number(cushion?.target_cushion_3m) || (metrics?.monthly_average_spend ? metrics.monthly_average_spend * 3 : 0);
-
-    // Update Pill Counters & Status Badge
-    const curValEl = document.getElementById('cushionCurrentVal');
-    const targetValEl = document.getElementById('cushionTargetVal');
-    const badgeEl = document.getElementById('cushionStatusBadge');
-    if (curValEl) curValEl.textContent = formatMoney(currentCushion);
-    if (targetValEl) targetValEl.textContent = formatMoney(target3m);
-    if (badgeEl) {
-      const runway = cushion?.runway_months ?? 0;
-      badgeEl.textContent = `🛡️ ${runway} мес.`;
-      if (runway >= 3) {
-        badgeEl.style.background = 'rgba(34, 197, 94, 0.15)';
-        badgeEl.style.color = '#22c55e';
-      } else if (runway >= 1) {
-        badgeEl.style.background = 'rgba(234, 179, 8, 0.15)';
-        badgeEl.style.color = '#eab308';
-      } else {
-        badgeEl.style.background = 'rgba(239, 68, 68, 0.15)';
-        badgeEl.style.color = '#ef4444';
-      }
-    }
-
-    const isLight = document.body.classList.contains('theme-light');
-    const svgWidth = 340;
-    const svgHeight = 175;
-    const padTop = 26;
-    const padBottom = 26;
-    const padX = 14;
-    const availWidth = svgWidth - padX * 2;
-    const availHeight = svgHeight - padTop - padBottom;
-
-    const values = history.map(h => Number(h.cushion_balance) || 0);
-    const maxY = Math.max(...values, target3m * 1.15, 100);
-    const count = history.length;
-    const stepX = availWidth / (count - 1 || 1);
-
-    const points = values.map((val, idx) => {
-      const x = padX + idx * stepX;
-      const y = svgHeight - padBottom - Math.round((val / maxY) * availHeight);
-      return { x, y, val };
-    });
-
-    // Area & Line Path
-    let lineD = '';
-    points.forEach((pt, i) => {
-      lineD += (i === 0 ? `M ${pt.x},${pt.y}` : ` L ${pt.x},${pt.y}`);
-    });
-    const areaD = `${lineD} L ${points[points.length - 1].x},${svgHeight - padBottom} L ${points[0].x},${svgHeight - padBottom} Z`;
-
-    // Target Cushion 3x Line
-    const targetY = svgHeight - padBottom - Math.round((target3m / maxY) * availHeight);
-    const labelColor = isLight ? '#334155' : '#94a3b8';
-
-    let markersSvg = '';
-    points.forEach((pt, idx) => {
-      const item = history[idx];
-      markersSvg += `
-        <circle cx="${pt.x}" cy="${pt.y}" r="3.5" fill="#38bdf8" stroke="${isLight ? '#ffffff' : '#0f172a'}" stroke-width="2" />
-        <text x="${pt.x}" y="${svgHeight - 8}" text-anchor="middle" fill="${labelColor}" font-size="10" font-weight="600">${item.label || item.month}</text>
-      `;
-    });
-
-    cushionChartContainer.innerHTML = `
-      <svg width="100%" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}" preserveAspectRatio="xMidYMid meet">
-        <defs>
-          <linearGradient id="cushionGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.3" />
-            <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.0" />
-          </linearGradient>
-        </defs>
-        ${target3m > 0 ? `
-          <line x1="${padX}" y1="${targetY}" x2="${svgWidth - padX}" y2="${targetY}" stroke="#eab308" stroke-width="1.5" stroke-dasharray="4 4" />
-          <text x="${svgWidth - padX}" y="${targetY - 5}" text-anchor="end" fill="#eab308" font-size="9" font-weight="700">Цель 3x: ${formatCompact(target3m)}</text>
-        ` : ''}
-        <path d="${areaD}" fill="url(#cushionGrad)" />
-        <path d="${lineD}" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-        ${markersSvg}
-      </svg>
-    `;
-  }
-
-  // Chart 3: Essential vs Discretionary 100% Stacked Bar
-  function renderEssentialChart(history) {
-    if (!essentialChartContainer) return;
-    const insightEl = document.getElementById('ruleInsightCard');
-    if (!history || history.length === 0) {
-      essentialChartContainer.innerHTML = '<div class="empty-banner"><p class="empty-title">Нет истории трат</p></div>';
-      return;
-    }
-
-    const isLight = document.body.classList.contains('theme-light');
-    const svgWidth = 340;
-    const svgHeight = 175;
-    const padTop = 22;
-    const padBottom = 26;
-    const padX = 14;
-    const availWidth = svgWidth - padX * 2;
-    const availHeight = svgHeight - padTop - padBottom;
-
-    const count = history.length;
-    const slotWidth = availWidth / count;
-    const barWidth = Math.min(22, Math.max(12, slotWidth * 0.48));
-    const labelColor = isLight ? '#334155' : '#94a3b8';
-
-    // 50% Benchmark Line
-    const y50 = padTop + availHeight * 0.5;
-
-    let barsSvg = '';
-    history.forEach((item, idx) => {
-      const essPct = Number(item.essential_percent) || 0;
-      const hEss = Math.round((essPct / 100) * availHeight);
-      const hDisc = availHeight - hEss;
-
-      const slotCenter = padX + idx * slotWidth + slotWidth / 2;
-      const x = slotCenter - barWidth / 2;
-      const yDisc = padTop;
-      const yEss = padTop + hDisc;
-
-      barsSvg += `
-        <g class="stacked-bar-group">
-          <rect x="${x}" y="${yDisc}" width="${barWidth}" height="${hDisc}" rx="3" fill="#f59e0b" opacity="0.9" />
-          <rect x="${x}" y="${yEss}" width="${barWidth}" height="${hEss}" rx="3" fill="#6366f1" opacity="0.9" />
-          ${hEss >= 16 ? `<text x="${slotCenter}" y="${yEss + hEss / 2 + 3}" text-anchor="middle" fill="#ffffff" font-size="8.5" font-weight="700">${Math.round(essPct)}%</text>` : ''}
-          <text x="${slotCenter}" y="${svgHeight - 8}" text-anchor="middle" fill="${labelColor}" font-size="10" font-weight="600">${item.label || item.month}</text>
-        </g>
-      `;
-    });
-
-    essentialChartContainer.innerHTML = `
-      <svg width="100%" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}" preserveAspectRatio="xMidYMid meet">
-        <line x1="${padX}" y1="${y50}" x2="${svgWidth - padX}" y2="${y50}" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.85" />
-        <text x="${svgWidth - padX}" y="${y50 - 4}" text-anchor="end" fill="#ef4444" font-size="9" font-weight="700">Лимит 50%</text>
-        ${barsSvg}
-      </svg>
-    `;
-
-    // Financial Resilience Insight
-    if (insightEl) {
-      const curEss = Number(history[history.length - 1]?.essential_percent) || 0;
-      if (curEss <= 50) {
-        insightEl.className = 'rule-insight-card healthy';
-        insightEl.innerHTML = `<b>Запас прочности высокий:</b> обязательные расходы составляют <b>${curEss}%</b> (в пределах нормы 50%). Бюджет защищен от форс-мажоров.`;
-      } else if (curEss <= 70) {
-        insightEl.className = 'rule-insight-card warning';
-        insightEl.innerHTML = `<b>Умеренная гибкость:</b> обязательные расходы занимают <b>${curEss}%</b> бюджета. Рекомендуется контролировать постоянные подписки и платежи.`;
-      } else {
-        insightEl.className = 'rule-insight-card critical';
-        insightEl.innerHTML = `<b>Внимание!</b> Обязательные расходы достигают <b>${curEss}%</b>. При снижении дохода бюджет не имеет резерва для маневра.`;
-      }
     }
   }
 
@@ -1899,6 +1630,70 @@
         </div>
       </div>
     `).join('');
+  }
+
+  function renderBarChart(history) {
+    if (!barChartContainer) return;
+    if (!history || history.length === 0) {
+      barChartContainer.innerHTML = `
+        <div class="empty-banner" style="padding: 24px 0;">
+          <p class="empty-title">Нет истории трат</p>
+          <span class="empty-desc">Данные появятся по мере накопления расходов</span>
+        </div>`;
+      return;
+    }
+
+    const isLight = document.body.classList.contains('theme-light');
+    const svgWidth = 330;
+    const svgHeight = 160;
+    const padTop = 26;
+    const padBottom = 28;
+    const padX = 10;
+    const availWidth = svgWidth - padX * 2;
+    const availHeight = svgHeight - padTop - padBottom;
+
+    const maxExp = Math.max(...history.map(h => Number(h.total_expense) || 0), 100);
+    const count = history.length;
+    const slotWidth = availWidth / count;
+    const barWidth = Math.min(30, Math.max(16, slotWidth * 0.6));
+
+    const baselineColor = isLight ? 'rgba(15, 23, 42, 0.12)' : 'rgba(255, 255, 255, 0.1)';
+    const amountColor = isLight ? '#0f172a' : '#cbd5e1';
+    const labelColor = isLight ? '#334155' : '#94a3b8';
+    const emptyBarColor = isLight ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.15)';
+
+    let barsSvg = '';
+    history.forEach((item, idx) => {
+      const exp = Number(item.total_expense) || 0;
+      const barHeight = Math.max(exp > 0 ? 4 : 0, Math.round((exp / maxExp) * availHeight));
+      const x = padX + idx * slotWidth + (slotWidth - barWidth) / 2;
+      const y = svgHeight - padBottom - barHeight;
+
+      const label = item.label || `${item.month}`;
+      const amountText = exp > 0 ? formatCompact(exp) : '0';
+
+      barsSvg += `
+        <g class="bar-group">
+          ${exp > 0 ? `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="4" fill="url(#barGradient)" opacity="0.9" />` : `<rect x="${x}" y="${svgHeight - padBottom - 2}" width="${barWidth}" height="2" rx="1" fill="${emptyBarColor}" />`}
+          <text x="${x + barWidth / 2}" y="${y - 6}" text-anchor="middle" fill="${amountColor}" font-size="10" font-weight="700">${amountText}</text>
+          <text x="${x + barWidth / 2}" y="${svgHeight - 10}" text-anchor="middle" fill="${labelColor}" font-size="11" font-weight="600">${label}</text>
+        </g>
+      `;
+    });
+
+    const baselineY = svgHeight - padBottom;
+    barChartContainer.innerHTML = `
+      <svg width="100%" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="barGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#38bdf8" />
+            <stop offset="100%" stop-color="#0284c7" />
+          </linearGradient>
+        </defs>
+        <line x1="${padX}" y1="${baselineY}" x2="${svgWidth - padX}" y2="${baselineY}" stroke="${baselineColor}" stroke-width="1" />
+        ${barsSvg}
+      </svg>
+    `;
   }
 
   refreshBtn.addEventListener('click', () => {

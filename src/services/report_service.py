@@ -30,17 +30,6 @@ CATEGORY_UI_META: dict[str, dict[str, str]] = {
     "Денежный перевод": {"color": "#8b5cf6", "icon": "💸"},
 }
 
-ESSENTIAL_CATEGORIES: set[str] = {
-    "Продукты",
-    "Обязательные расходы",
-    "Здоровье",
-    "Транспорт",
-    "Погашение кредита",
-    "Ребёнок",
-    "Образование",
-    "Питомец",
-}
-
 FALLBACK_COLORS = ["#f97316", "#22c55e", "#38bdf8", "#a855f7", "#ec4899", "#eab308", "#6366f1", "#14b8a6", "#84cc16", "#06b6d4", "#f43f5e", "#94a3b8"]
 
 def get_category_ui_meta(name: str, index: int = 0) -> dict[str, str]:
@@ -220,7 +209,7 @@ class ReportService:
         family_group_id: UUID | None = None,
         months_count: int = 6
     ) -> dict[str, Any]:
-        """Monthly dynamics with grouped cashflows, cushion trajectory, and essential breakdown."""
+        """Monthly spending and income dynamics for the past N calendar months."""
         now = datetime.now(timezone.utc)
         cur_year, cur_month = now.year, now.month
         month_keys: list[tuple[int, int]] = []
@@ -244,24 +233,16 @@ class ReportService:
             conditions.append(Transaction.related_transaction_id.is_(None))
         else:
             conditions.append(Transaction.user_id == user_id)
-            conditions.append(Transaction.related_transaction_id.is_(None))
 
         month_trunc = func.date_trunc("month", Transaction.transaction_date)
-        is_essential_col = case(
-            (Category.name.in_(ESSENTIAL_CATEGORIES), "essential"),
-            else_="discretionary"
-        ).label("category_kind")
-
         query = (
             select(
                 month_trunc.label("m_date"),
                 Transaction.type,
-                is_essential_col,
                 func.coalesce(func.sum(Transaction.amount), 0).label("total")
             )
-            .outerjoin(Category, Transaction.category_id == Category.id)
             .where(and_(*conditions))
-            .group_by("m_date", Transaction.type, is_essential_col)
+            .group_by("m_date", Transaction.type)
             .order_by("m_date")
         )
         rows = (await self.session.execute(query)).all()
@@ -271,130 +252,46 @@ class ReportService:
             d = r.m_date
             key = (d.year, d.month)
             if key not in data_map:
-                data_map[key] = {
-                    "expense": 0.0,
-                    "income": 0.0,
-                    "essential": 0.0,
-                    "discretionary": 0.0
-                }
-            amt = float(r.total)
-            if r.type == CategoryType.income:
-                data_map[key]["income"] += amt
-            elif r.type == CategoryType.expense:
-                data_map[key]["expense"] += amt
-                if r.category_kind == "essential":
-                    data_map[key]["essential"] += amt
-                else:
-                    data_map[key]["discretionary"] += amt
-
-        # Cushion snapshot calculation
-        user = await self.session.get(User, user_id)
-        if family_group_id:
-            members_res = await self.session.scalars(
-                select(User).where(User.family_group_id == family_group_id)
-            )
-            members = list(members_res.all())
-            target_user_ids = [m.id for m in members] or [user_id]
-            initial_balance = sum(float(m.initial_balance or 0.0) for m in members)
-        else:
-            target_user_ids = [user_id]
-            initial_balance = float(user.initial_balance or 0.0) if user else 0.0
-
-        liquid_query = (
-            select(
-                func.coalesce(func.sum(case((and_(Transaction.type == CategoryType.income, Transaction.asset_account_id.is_(None)), Transaction.amount), else_=0)), 0).label("liquid_inc"),
-                func.coalesce(func.sum(case((Transaction.type == CategoryType.expense, Transaction.amount), else_=0)), 0).label("exp"),
-                func.coalesce(func.sum(case((Transaction.type == CategoryType.transfer_out, Transaction.amount), else_=0)), 0).label("tout"),
-                func.coalesce(func.sum(case((Transaction.type == CategoryType.transfer_in, Transaction.amount), else_=0)), 0).label("tin"),
-            )
-            .where(Transaction.user_id.in_(target_user_ids))
-        )
-        l_row = (await self.session.execute(liquid_query)).one()
-        current_liquid_balance = round(
-            initial_balance + float(l_row.liquid_inc) - float(l_row.exp) - float(l_row.tout) + float(l_row.tin), 2
-        )
-
-        deposit_query = (
-            select(func.coalesce(func.sum(AssetAccount.balance), 0))
-            .where(AssetAccount.user_id.in_(target_user_ids), AssetAccount.is_active.is_(True))
-        )
-        total_deposit_balance = round(float(await self.session.scalar(deposit_query) or 0.0), 2)
-        current_cushion = round(max(0.0, current_liquid_balance) + total_deposit_balance, 2)
+                data_map[key] = {"expense": 0.0, "income": 0.0}
+            if r.type == CategoryType.expense:
+                data_map[key]["expense"] = float(r.total)
+            elif r.type == CategoryType.income:
+                data_map[key]["income"] = float(r.total)
 
         history: list[dict[str, Any]] = []
         expense_values: list[float] = []
-        cum_savings = 0.0
-
         for (y, m) in month_keys:
-            m_data = data_map.get((y, m), {})
-            exp = m_data.get("expense", 0.0)
-            inc = m_data.get("income", 0.0)
-            ess = m_data.get("essential", 0.0)
-            disc = m_data.get("discretionary", 0.0)
-            net = inc - exp
-            cum_savings += net
-
-            ess_pct = round((ess / exp * 100), 1) if exp > 0 else 0.0
-            disc_pct = round((disc / exp * 100), 1) if exp > 0 else 0.0
-
+            exp = data_map.get((y, m), {}).get("expense", 0.0)
+            inc = data_map.get((y, m), {}).get("income", 0.0)
             history.append({
                 "year": y,
                 "month": m,
                 "label": MONTH_SHORT_RU[m],
                 "total_expense": round(exp, 2),
                 "total_income": round(inc, 2),
-                "net_savings": round(net, 2),
-                "cumulative_savings": round(cum_savings, 2),
-                "cushion_balance": 0.0,
-                "essential_expense": round(ess, 2),
-                "discretionary_expense": round(disc, 2),
-                "essential_percent": ess_pct,
-                "discretionary_percent": disc_pct,
+                "net_savings": round(inc - exp, 2)
             })
             expense_values.append(exp)
-
-        # Backwards capital curve reconstruction
-        running_cushion = current_cushion
-        for item in reversed(history):
-            item["cushion_balance"] = round(max(0.0, running_cushion), 2)
-            running_cushion -= item["net_savings"]
 
         cur_spend = expense_values[-1] if expense_values else 0.0
         avg_spend = sum(expense_values) / len(expense_values) if expense_values else 0.0
 
-        target_cushion_3m = round(avg_spend * 3, 2)
-        target_cushion_6m = round(avg_spend * 6, 2)
-        runway_months = round((current_cushion / avg_spend), 1) if avg_spend > 0 else 99.0
-        cushion_status = "healthy" if runway_months >= 3.0 else ("warning" if runway_months >= 1.0 else "critical")
-
-        cushion_info = {
-            "current_cushion": current_cushion,
-            "target_cushion_3m": target_cushion_3m,
-            "target_cushion_6m": target_cushion_6m,
-            "runway_months": runway_months,
-            "status": cushion_status,
-        }
-
         cat_data = await self.get_category_breakdown(user_id, family_group_id, "month")
         top_cat = cat_data["categories"][0] if cat_data["categories"] else None
-        last_item = history[-1] if history else {}
 
         metrics = {
             "current_month_spend": round(cur_spend, 2),
             "monthly_average_spend": round(avg_spend, 2),
             "top_category_name": top_cat["name"] if top_cat else None,
             "top_category_amount": top_cat["amount"] if top_cat else None,
-            "top_category_percent": top_cat["percentage"] if top_cat else None,
-            "current_month_net_savings": last_item.get("net_savings", 0.0),
-            "current_month_essential_percent": last_item.get("essential_percent", 0.0),
+            "top_category_percent": top_cat["percentage"] if top_cat else None
         }
 
         return {
             "currency": "KZT",
             "months_count": months_count,
             "history": history,
-            "metrics": metrics,
-            "cushion": cushion_info,
+            "metrics": metrics
         }
 
     @staticmethod
