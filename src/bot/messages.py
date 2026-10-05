@@ -1,3 +1,4 @@
+import html
 from typing import Any, List, Union
 from src.models.transaction import Transaction
 from src.models.category import CategoryType
@@ -8,6 +9,13 @@ CURRENCY_SYMBOLS: dict[str, str] = {
     "USD": "$",
     "EUR": "€",
 }
+
+
+def esc(value: Any) -> str:
+    """Escapes user/AI text safely for Telegram HTML parse mode."""
+    if value is None:
+        return ""
+    return html.escape(str(value), quote=False)
 
 
 def get_currency_symbol(currency_code: str | None) -> str:
@@ -56,7 +64,7 @@ class BotMessages:
                 icon = "💸"
                 type_label = "Расход"
 
-            cat_name = tx.category.name if tx.category else "Общее"
+            cat_name = esc(tx.category.name if tx.category else "Общее")
 
             amount_str = f"<b>{format_amount(tx.amount, currency)}</b>"
             if tx.asset_amount:
@@ -69,7 +77,7 @@ class BotMessages:
             return (
                 f"✅ <b>Записано!</b>\n\n"
                 f"{icon} <b>{type_label}</b>: {amount_str}{discount_line}\n"
-                f"📌 Позиция: <b>{tx.item_name}</b>\n"
+                f"📌 Позиция: <b>{esc(tx.item_name)}</b>\n"
                 f"📁 Категория: <b>{cat_name}</b>"
                 f"{balance_suffix}"
             )
@@ -82,15 +90,15 @@ class BotMessages:
 
         for i, tx in enumerate(tx_list, start=1):
             icon = "💸" if tx.type == CategoryType.expense else "💰"
-            cat_name = tx.category.name if tx.category else "Общее"
+            cat_name = esc(tx.category.name if tx.category else "Общее")
             if tx.discount_amount and tx.discount_amount > 0 and tx.original_amount:
                 lines.append(
-                    f"{i}. {icon} <b>{tx.item_name}</b> — {format_amount(tx.amount, currency)} "
+                    f"{i}. {icon} <b>{esc(tx.item_name)}</b> — {format_amount(tx.amount, currency)} "
                     f"<s>{format_amount(tx.original_amount, currency)}</s> (<i>{cat_name}</i>)"
                 )
                 total_discount += float(tx.discount_amount)
             else:
-                lines.append(f"{i}. {icon} <b>{tx.item_name}</b> — {format_amount(tx.amount, currency)} (<i>{cat_name}</i>)")
+                lines.append(f"{i}. {icon} <b>{esc(tx.item_name)}</b> — {format_amount(tx.amount, currency)} (<i>{cat_name}</i>)")
 
             if tx.type == CategoryType.expense:
                 total_expense += float(tx.amount)
@@ -124,7 +132,7 @@ class BotMessages:
     ) -> str:
         lines = [f"🧾 <b>Обработано чеков: {len(receipts)}</b>\n"]
         for i, r in enumerate(receipts, start=1):
-            title = r.get("title", f"Чек {i}")
+            title = esc(r.get("title", f"Чек {i}"))
             amt = format_amount(r.get("total_amount", 0.0), currency)
             if title and title.lower() != "чек" and not title.lower().startswith(f"чек {i}"):
                 lines.append(f"• Чек {i}: <b>{title}</b> ({amt})")
@@ -142,7 +150,7 @@ class BotMessages:
     def voice_clarification(recognized_text: str | None = None) -> str:
         if recognized_text:
             return (
-                f"🎙️ Я распознал: «<i>{recognized_text}</i>», но не понял точную сумму.\n\n"
+                f"🎙️ Я распознал: «<i>{esc(recognized_text)}</i>», но не понял точную сумму.\n\n"
                 f"<b>Повтори, пожалуйста!</b> Назови сумму и покупку, например:\n"
                 f"• <i>«Кофе 250 рублей»</i>\n"
                 f"• <i>«Такси 450»</i>\n"
@@ -211,7 +219,7 @@ class BotMessages:
 
     @staticmethod
     def welcome_back(first_name: str | None, currency: str, current_balance: float | None = None) -> str:
-        name_greeting = f", {first_name}" if first_name else ""
+        name_greeting = f", {esc(first_name)}" if first_name else ""
         symbol = get_currency_symbol(currency)
         balance_part = ""
         if current_balance is not None:
@@ -268,7 +276,7 @@ def format_summary_card(
 
     lines = [
         f"📊 <b>Финансовая сводка ({scope_title})</b>",
-        f"📅 Период: <b>{getattr(summary, 'period_label', '')}</b>",
+        f"📅 Период: <b>{esc(getattr(summary, 'period_label', ''))}</b>",
         "━━━━━━━━━━━━━━━━━━━━━",
         f"💸 <b>Расходы:</b> {format_amount(getattr(summary, 'total_expense', 0.0), curr)}",
         f"💰 <b>Доходы:</b> {format_amount(getattr(summary, 'total_income', 0.0), curr)}",
@@ -282,7 +290,7 @@ def format_summary_card(
         top_cat_share = getattr(summary, "top_category_share", 0.0)
         lines.extend([
             "🏆 <b>Главная категория трат:</b>",
-            f"• <b>{top_cat_name}</b>: {format_amount(top_cat_amount, curr)} (<b>{top_cat_share}%</b> от всех трат)",
+            f"• <b>{esc(top_cat_name)}</b>: {format_amount(top_cat_amount, curr)} (<b>{top_cat_share}%</b> от всех трат)",
             ""
         ])
 
@@ -303,9 +311,9 @@ def format_summary_card(
         lines.extend([
             "━━━━━━━━━━━━━━━━━━━━━",
             "🤖 <b>Рекомендации Smart Bujet:</b>",
-            f"✂️ <b>Где ужаться:</b> {advice.get('where_to_cut', '')}",
-            f"📥 <b>Куда отложить:</b> {advice.get('where_to_save', '')}",
-            f"⚠️ <b>Обратить внимание:</b> {advice.get('what_to_watch', '')}"
+            f"✂️ <b>Где ужаться:</b> {esc(advice.get('where_to_cut', ''))}",
+            f"📥 <b>Куда отложить:</b> {esc(advice.get('where_to_save', ''))}",
+            f"⚠️ <b>Обратить внимание:</b> {esc(advice.get('what_to_watch', ''))}"
         ])
 
     return "\n".join(lines)

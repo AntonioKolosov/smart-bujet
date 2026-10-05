@@ -1,7 +1,8 @@
 import uuid
+import math
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_user, get_db
@@ -13,15 +14,15 @@ router = APIRouter()
 
 
 class CreateAssetRequest(BaseModel):
-    name: str
+    name: str = Field(..., min_length=1, max_length=100)
     type: AssetType = AssetType.deposit
     currency: str = "KZT"
-    initial_balance: float = 0.0
-    interest_rate: Optional[float] = None
+    initial_balance: float = Field(default=0.0, ge=0.0)
+    interest_rate: Optional[float] = Field(default=None, ge=0.0, le=100.0)
 
 
 class AssetActionRequest(BaseModel):
-    amount: float
+    amount: float = Field(..., gt=0.0)
     note: Optional[str] = None
 
 
@@ -95,8 +96,11 @@ async def deposit_to_asset(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db)
 ):
-    if payload.amount <= 0:
-        raise HTTPException(status_code=400, detail="Сумма должна быть больше нуля")
+    if current_user.initial_balance is None:
+        raise HTTPException(status_code=400, detail="Сначала установите начальный баланс в боте")
+
+    if math.isnan(payload.amount) or math.isinf(payload.amount) or payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Сумма должна быть положительным числом")
 
     service = AssetService(session)
     try:
@@ -122,8 +126,11 @@ async def withdraw_from_asset(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db)
 ):
-    if payload.amount <= 0:
-        raise HTTPException(status_code=400, detail="Сумма должна быть больше нуля")
+    if current_user.initial_balance is None:
+        raise HTTPException(status_code=400, detail="Сначала установите начальный баланс в боте")
+
+    if math.isnan(payload.amount) or math.isinf(payload.amount) or payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Сумма должна быть положительным числом")
 
     service = AssetService(session)
     try:

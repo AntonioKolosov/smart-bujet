@@ -68,6 +68,12 @@ async def repay_credit(
     db: AsyncSession = Depends(get_db)
 ):
     """Repay part or all of a credit/loan and atomically record ledger expense."""
+    if current_user.initial_balance is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Сначала установите начальный баланс в боте"
+        )
+
     if payload.amount <= Decimal("0.0"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -87,8 +93,14 @@ async def repay_credit(
             detail="Кредитный счет не найден"
         )
 
-    # 1. Deduct remaining amount
     curr_remaining = Decimal(str(credit.remaining_amount or 0))
+    if not credit.is_active or curr_remaining <= Decimal("0.0"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Кредит уже полностью погашен"
+        )
+
+    # 1. Deduct remaining amount
     new_remaining = max(Decimal("0.0"), curr_remaining - payload.amount)
     credit.remaining_amount = new_remaining
     if credit.is_active and new_remaining <= Decimal("0.0"):

@@ -2,6 +2,7 @@ import json
 import logging
 import re
 import asyncio
+import math
 from decimal import Decimal
 from typing import Any
 try:
@@ -32,15 +33,44 @@ def normalize_receipt_payload(raw_text: str) -> dict[str, Any]:
     try:
         data = json.loads(clean_text)
     except Exception:
-        return {"items": []}
+        return {"is_financial": True, "items": []}
+
+    def _sanitize_items(raw_items: list) -> list[dict[str, Any]]:
+        sanitized = []
+        for x in raw_items:
+            if not isinstance(x, dict):
+                continue
+            amt = x.get("amount")
+            if amt is None:
+                continue
+            try:
+                num_amt = float(amt)
+                if math.isnan(num_amt) or math.isinf(num_amt) or num_amt <= 0:
+                    continue
+                x["amount"] = num_amt
+            except (ValueError, TypeError):
+                continue
+
+            if "asset_amount" in x and x["asset_amount"] is not None:
+                try:
+                    num_asset = float(x["asset_amount"])
+                    if math.isnan(num_asset) or math.isinf(num_asset) or num_asset <= 0:
+                        x["asset_amount"] = None
+                    else:
+                        x["asset_amount"] = num_asset
+                except (ValueError, TypeError):
+                    x["asset_amount"] = None
+
+            sanitized.append(x)
+        return sanitized
 
     if isinstance(data, list):
-        items = [x for x in data if isinstance(x, dict)]
+        items = _sanitize_items(data)
         return {"is_financial": True, "items": items}
     elif isinstance(data, dict):
         is_financial = data.get("is_financial")
-        # Explicit non-financial rejection by AI Guardrails
-        if is_financial is False:
+        # Explicit non-financial rejection by AI Guardrails (handles False, "false", "False", 0, "0")
+        if is_financial in (False, "false", "False", 0, "0"):
             return {
                 "is_financial": False,
                 "items": [],
@@ -52,13 +82,15 @@ def normalize_receipt_payload(raw_text: str) -> dict[str, Any]:
         items = []
         for key in ("items", "transactions", "data", "results"):
             if isinstance(data.get(key), list):
-                items = [x for x in data[key] if isinstance(x, dict)]
+                items = data[key]
                 break
         if not items and "item_name" in data:
             items = [data]
+
+        valid_items = _sanitize_items(items)
         payload = {
             "is_financial": True,
-            "items": items,
+            "items": valid_items,
             "discount_percent": data.get("discount_percent"),
             "discount_amount": data.get("discount_amount"),
             "total_paid": data.get("total_paid"),

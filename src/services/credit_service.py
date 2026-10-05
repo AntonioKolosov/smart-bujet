@@ -72,7 +72,8 @@ class CreditService:
         bank_name: str | None = None,
         interest_rate: Decimal | None = None,
         monthly_payment: Decimal | None = None,
-        remaining_amount: Decimal | None = None
+        remaining_amount: Decimal | None = None,
+        auto_commit: bool = True
     ) -> CreditAccount:
         """Create new credit account."""
         rem_amt = remaining_amount if remaining_amount is not None else original_amount
@@ -89,15 +90,19 @@ class CreditService:
             closed_at=func.now() if rem_amt <= Decimal("0.0") else None
         )
         self.session.add(credit)
-        await self.session.commit()
-        await self.session.refresh(credit)
+        if auto_commit:
+            await self.session.commit()
+            await self.session.refresh(credit)
+        else:
+            await self.session.flush()
         return credit
 
     async def repay_credit(
         self,
         user_id: int,
         credit_id: uuid.UUID,
-        amount: Decimal
+        amount: Decimal,
+        auto_commit: bool = True
     ) -> tuple[CreditAccount | None, bool]:
         """
         Deduct repayment amount from remaining_amount.
@@ -108,7 +113,8 @@ class CreditService:
         if not credit:
             return None, False
 
-        new_remaining = max(Decimal("0.0"), credit.remaining_amount - amount)
+        curr_remaining = Decimal(str(credit.remaining_amount or 0))
+        new_remaining = max(Decimal("0.0"), curr_remaining - amount)
         was_just_closed = False
         if credit.is_active and new_remaining <= Decimal("0.0"):
             credit.is_active = False
@@ -116,8 +122,11 @@ class CreditService:
             was_just_closed = True
 
         credit.remaining_amount = new_remaining
-        await self.session.commit()
-        await self.session.refresh(credit)
+        if auto_commit:
+            await self.session.commit()
+            await self.session.refresh(credit)
+        else:
+            await self.session.flush()
         return credit, was_just_closed
 
     async def delete_credit(

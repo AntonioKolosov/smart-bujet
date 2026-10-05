@@ -393,7 +393,8 @@ class TransactionService:
                     user_id=user_id,
                     name=credit_name,
                     original_amount=amt,
-                    currency=user.currency if user else "KZT"
+                    currency=user.currency if user else "KZT",
+                    auto_commit=False
                 )
                 credit_account_id = new_credit.id
                 normalized_name = f"Кредит: {new_credit.name}"
@@ -409,7 +410,8 @@ class TransactionService:
                     updated_credit, was_closed = await self.credit_service.repay_credit(
                         user_id=user_id,
                         credit_id=credit.id,
-                        amount=amt
+                        amount=amt,
+                        auto_commit=False
                     )
                     credit_account_id = credit.id
                     rem_str = f"{float(updated_credit.remaining_amount):,.2f}".replace(",", " ")
@@ -555,7 +557,8 @@ class TransactionService:
                     user_id=user_id,
                     name=credit_name,
                     original_amount=amt,
-                    currency=user.currency if user else "KZT"
+                    currency=user.currency if user else "KZT",
+                    auto_commit=False
                 )
                 credit_account_id = new_credit.id
                 normalized_name = f"Кредит: {new_credit.name}"
@@ -571,7 +574,8 @@ class TransactionService:
                     updated_credit, was_closed = await self.credit_service.repay_credit(
                         user_id=user_id,
                         credit_id=credit.id,
-                        amount=amt
+                        amount=amt,
+                        auto_commit=False
                     )
                     credit_account_id = credit.id
                     rem_str = f"{float(updated_credit.remaining_amount):,.2f}".replace(",", " ")
@@ -1000,34 +1004,42 @@ class TransactionService:
                 if tx.asset_account_id:
                     asset = await self.session.get(AssetAccount, tx.asset_account_id)
                     if asset:
-                        curr_asset_bal = Decimal(str(asset.balance or 0))
-                        if tx.type == CategoryType.transfer_out:
-                            asset.balance = float(curr_asset_bal + delta)
-                        elif tx.type == CategoryType.transfer_in:
-                            asset.balance = float(curr_asset_bal - delta)
-
+                        old_asset_amt = Decimal(str(tx.asset_amount if tx.asset_amount is not None else old_amount))
                         if tx.exchange_rate:
-                            tx.asset_amount = float(new_amount * Decimal(str(tx.exchange_rate)))
+                            new_asset_amt = new_amount * Decimal(str(tx.exchange_rate))
                         else:
-                            tx.asset_amount = float(new_amount)
+                            new_asset_amt = new_amount
+                        asset_delta = new_asset_amt - old_asset_amt
 
-                # Credit repayment adjustment
+                        curr_asset_bal = Decimal(str(asset.balance or 0))
+                        if tx.type in (CategoryType.transfer_out, CategoryType.income):
+                            asset.balance = float(curr_asset_bal + asset_delta)
+                        elif tx.type == CategoryType.transfer_in:
+                            asset.balance = float(curr_asset_bal - asset_delta)
+
+                        tx.asset_amount = float(new_asset_amt)
+
+                # Credit adjustment
                 if tx.credit_account_id:
                     credit = await self.session.get(CreditAccount, tx.credit_account_id)
-                    if credit and tx.type == CategoryType.expense:
+                    if credit:
                         curr_rem = Decimal(str(credit.remaining_amount or 0))
-                        new_remaining = curr_rem - delta
-                        if new_remaining < Decimal("0"):
-                            raise HTTPException(
-                                status_code=status.HTTP_400_BAD_REQUEST,
-                                detail="Сумма платежа не может превышать текущий остаток задолженности"
-                            )
-                        credit.remaining_amount = new_remaining
-                        credit.is_active = (new_remaining > Decimal("0"))
-                        if new_remaining <= Decimal("0") and not credit.closed_at:
-                            credit.closed_at = func.now()
-                        elif new_remaining > Decimal("0") and credit.closed_at:
-                            credit.closed_at = None
+                        if tx.type == CategoryType.expense:
+                            new_remaining = curr_rem - delta
+                            if new_remaining < Decimal("0"):
+                                raise HTTPException(
+                                    status_code=status.HTTP_400_BAD_REQUEST,
+                                    detail="Сумма платежа не может превышать текущий остаток задолженности"
+                                )
+                            credit.remaining_amount = new_remaining
+                            credit.is_active = (new_remaining > Decimal("0"))
+                            if new_remaining <= Decimal("0") and not credit.closed_at:
+                                credit.closed_at = func.now()
+                            elif new_remaining > Decimal("0") and credit.closed_at:
+                                credit.closed_at = None
+                        elif tx.type == CategoryType.income:
+                            credit.original_amount = Decimal(str(credit.original_amount or 0)) + delta
+                            credit.remaining_amount = curr_rem + delta
 
                 # Intra-family mirror sync
                 if tx.related_transaction_id:
@@ -1108,7 +1120,11 @@ class TransactionService:
                     # Откат платежа по кредиту: долг увеличивается, кредит возобновляется
                     payment_amt = Decimal(str(tx.amount))
                     curr_rem = Decimal(str(credit.remaining_amount or 0))
-                    new_remaining = curr_rem + payment_amt
+                    orig_amount = Decimal(str(credit.original_amount or 0))
+                    if orig_amount > Decimal("0.0"):
+                        new_remaining = min(orig_amount, curr_rem + payment_amt)
+                    else:
+                        new_remaining = curr_rem + payment_amt
                     credit.remaining_amount = new_remaining
 
                     if new_remaining > Decimal("0.0"):

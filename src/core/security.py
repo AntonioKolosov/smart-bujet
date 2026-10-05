@@ -4,6 +4,9 @@ import time
 from urllib.parse import parse_qsl
 
 def validate_init_data(init_data: str, bot_token: str) -> dict | None:
+    if not bot_token or not bot_token.strip():
+        return None
+
     try:
         parsed_data = dict(parse_qsl(init_data, keep_blank_values=True))
         if "hash" not in parsed_data:
@@ -14,8 +17,10 @@ def validate_init_data(init_data: str, bot_token: str) -> dict | None:
         if "auth_date" not in parsed_data:
             return None
             
+        now = time.time()
         auth_date = int(parsed_data["auth_date"])
-        if time.time() - auth_date > 86400:
+        # Reject expired data (> 24 hours old) or future timestamps beyond 60s clock skew
+        if (now - auth_date > 86400) or (auth_date - now > 60):
             return None
 
         data_check_string = "\n".join(
