@@ -1,4 +1,4 @@
-from typing import List, Union
+from typing import Any, List, Union
 from src.models.transaction import Transaction
 from src.models.category import CategoryType
 
