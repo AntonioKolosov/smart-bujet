@@ -6,7 +6,7 @@ from src.models.user import User
 from src.services.report_service import ReportService
 from src.services.ai_service import AIService
 from src.bot.messages import format_summary_card
-from src.bot.handlers.summary import summary_inline_keyboard
+from src.bot.handlers.summary import broadcast_digest_keyboard
 from src.bot.bot import bot
 
 
@@ -28,11 +28,7 @@ async def run_reports(period: str = "week"):
 
             advice = await ai_service.generate_financial_advice(summary)
             msg = "🔔 <b>Плановая сводка от Smart Bujet</b>\n\n" + format_summary_card(summary, advice)
-            kb = summary_inline_keyboard(
-                active_period=period,
-                active_scope="p",
-                has_family=bool(user.family_group_id)
-            )
+            kb = broadcast_digest_keyboard()
 
             try:
                 await bot.send_message(chat_id=user.id, text=msg, reply_markup=kb)

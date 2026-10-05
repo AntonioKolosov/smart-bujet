@@ -21,7 +21,7 @@ from src.models.report_log import ScheduledReportLog
 from src.services.report_service import ReportService
 from src.services.ai_service import AIService
 from src.bot.messages import format_summary_card
-from src.bot.handlers.summary import summary_inline_keyboard
+from src.bot.handlers.summary import broadcast_digest_keyboard
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -118,11 +118,7 @@ async def broadcast_scheduled_reports(
                 period_name_ru = {"weekly": "Недельная", "monthly": "Месячная", "yearly": "Годовая"}.get(report_type, "")
                 header = f"🔔 <b>{period_name_ru} сводка от Smart Bujet</b>\n\n"
                 text = header + format_summary_card(summary, advice)
-                kb = summary_inline_keyboard(
-                    active_period=period_code,
-                    active_scope="p",
-                    has_family=bool(user.family_group_id)
-                )
+                kb = broadcast_digest_keyboard()
 
                 await bot.send_message(chat_id=user.id, text=text, reply_markup=kb)
 
