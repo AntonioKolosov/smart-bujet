@@ -11,7 +11,18 @@ def currency_keyboard() -> InlineKeyboardMarkup:
     keyboard = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+def get_miniapp_url() -> str:
+    from src.core.config import settings
+    domain = settings.domain
+    if not domain or domain == "localhost":
+        domain = "85.198.89.188.sslip.io:8443"
+    elif ":" not in domain and "sslip.io" in domain:
+        domain = f"{domain}:8443"
+    return f"https://{domain}/app"
+
 def welcome_back_keyboard(miniapp_url: str | None = None) -> InlineKeyboardMarkup:
+    if miniapp_url is None:
+        miniapp_url = get_miniapp_url()
     rows = []
     if miniapp_url:
         rows.append([InlineKeyboardButton(text="📱 Открыть журнал транзакций", web_app=WebAppInfo(url=miniapp_url))])
@@ -24,7 +35,7 @@ def welcome_back_keyboard(miniapp_url: str | None = None) -> InlineKeyboardMarku
             InlineKeyboardButton(text="📊 Аналитика", web_app=WebAppInfo(url=analytics_url)),
         ])
     rows.append([
-        InlineKeyboardButton(text="📊 Сводка от агента", callback_data="sum:month:p"),
+        InlineKeyboardButton(text="📊 Сводка от агента", callback_data="sum:menu"),
         InlineKeyboardButton(text="💱 Изменить валюту", callback_data="change_currency"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)

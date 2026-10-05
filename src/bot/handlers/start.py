@@ -1,6 +1,6 @@
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command, CommandObject
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from src.models.user import User
@@ -13,11 +13,11 @@ from src.bot.keyboards.inline import (
     credits_keyboard,
     family_keyboard,
     analytics_keyboard,
+    get_miniapp_url,
 )
 from src.bot.messages import BotMessages
 from src.services.transaction_service import TransactionService
 from src.services.family_service import FamilyService
-from src.bot.handlers.summary import summary_reply_keyboard
 
 router = Router()
 
@@ -127,13 +127,21 @@ async def cmd_start(message: Message, session: AsyncSession, command: CommandObj
 
     if user.initial_balance is None:
         await message.answer(
-            f"👋 <b>С возвращением, {user.first_name or ''}!</b>\n\n{BotMessages.ask_initial_balance()}"
+            f"👋 <b>С возвращением, {user.first_name or ''}!</b>\n\n{BotMessages.ask_initial_balance()}",
+            reply_markup=ReplyKeyboardRemove()
         )
         return
 
     tx_service = TransactionService(session)
     bal_data = await tx_service.get_user_balance(user.id)
     miniapp_url = get_miniapp_url()
+
+    # Clear any residual persistent reply keyboard
+    try:
+        clean_msg = await message.answer("🔄", reply_markup=ReplyKeyboardRemove())
+        await clean_msg.delete()
+    except Exception:
+        pass
 
     await message.answer(
         BotMessages.welcome_back(
@@ -142,10 +150,6 @@ async def cmd_start(message: Message, session: AsyncSession, command: CommandObj
             current_balance=bal_data["current_balance"]
         ),
         reply_markup=welcome_back_keyboard(miniapp_url=miniapp_url)
-    )
-    await message.answer(
-        "💡 Для быстрой финансовой аналитики и рекомендаций нажмите кнопку «📊 Сводка»:",
-        reply_markup=summary_reply_keyboard()
     )
 
 @router.callback_query(F.data == "change_currency")

@@ -8,8 +8,7 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
+    ReplyKeyboardRemove,
 )
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,29 +17,25 @@ from src.models.user import User
 from src.services.report_service import ReportService
 from src.services.family_service import FamilyService
 from src.services.ai_service import AIService
-from src.bot.messages import format_summary_card
+from src.services.transaction_service import TransactionService
+from src.bot.messages import BotMessages, format_summary_card
+from src.bot.keyboards.inline import welcome_back_keyboard, get_miniapp_url
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
 
-def summary_reply_keyboard() -> ReplyKeyboardMarkup:
-    """Persistent reply keyboard button for quick summary invocation."""
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📊 Сводка")]],
-        resize_keyboard=True,
-        is_persistent=True,
-    )
-
-
 def summary_scope_selection_keyboard() -> InlineKeyboardMarkup:
-    """Initial inline keyboard asking user to choose personal or family summary."""
+    """Inline keyboard asking user to choose personal or family summary, or go back to main menu."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="👤 Личный", callback_data="sum:scope:p"),
-                InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семья", callback_data="sum:scope:f"),
+                InlineKeyboardButton(text="👤 Личная", callback_data="sum:scope:p"),
+                InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семейная", callback_data="sum:scope:f"),
+            ],
+            [
+                InlineKeyboardButton(text="🔙 Назад", callback_data="sum:back:main"),
             ]
         ]
     )
@@ -50,26 +45,30 @@ def summary_card_inline_keyboard(active_scope: str) -> InlineKeyboardMarkup:
     """
     Compact inline keyboard for current moment summary.
     Eliminates period switcher buttons ('7 дней', 'Месяц', 'Год').
-    Allows instant refresh and one-tap toggle between personal and family views.
+    Allows instant refresh, one-tap toggle between personal and family views, and back navigation.
     """
     if active_scope == "p":
-        row = [
+        row1 = [
             InlineKeyboardButton(text="🔄 Обновить", callback_data="sum:refresh:p"),
-            InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семья", callback_data="sum:scope:f"),
+            InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семейная", callback_data="sum:scope:f"),
         ]
     else:
-        row = [
+        row1 = [
             InlineKeyboardButton(text="🔄 Обновить", callback_data="sum:refresh:f"),
-            InlineKeyboardButton(text="👤 Личный", callback_data="sum:scope:p"),
+            InlineKeyboardButton(text="👤 Личная", callback_data="sum:scope:p"),
         ]
-    return InlineKeyboardMarkup(inline_keyboard=[row])
+    row2 = [
+        InlineKeyboardButton(text="🔙 Назад", callback_data="sum:menu"),
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=[row1, row2])
 
 
 def summary_no_family_keyboard() -> InlineKeyboardMarkup:
     """Keyboard for users requesting family summary without an active partner."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="👤 Личный", callback_data="sum:scope:p")]
+            [InlineKeyboardButton(text="👤 Личная", callback_data="sum:scope:p")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="sum:menu")],
         ]
     )
 
@@ -78,7 +77,7 @@ def broadcast_digest_keyboard() -> InlineKeyboardMarkup:
     """Fixed digest keyboard for scheduled broadcasts without period switcher buttons."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📊 Сводка на текущий момент", callback_data="sum:scope:p")]
+            [InlineKeyboardButton(text="📊 Сводка от агента", callback_data="sum:menu")]
         ]
     )
 
@@ -93,7 +92,7 @@ def summary_inline_keyboard(
 
 
 @router.message(Command("summary"))
-@router.message(F.text.in_(["📊 Сводка", "Сводка", "сводка"]))
+@router.message(F.text.in_(["📊 Сводка", "Сводка", "сводка", "Сводка от агента", "📊 Сводка от агента"]))
 async def cmd_summary(message: Message, session: AsyncSession):
     """
     Step 1 of refined UX flow:
@@ -104,7 +103,14 @@ async def cmd_summary(message: Message, session: AsyncSession):
     if not user:
         return
 
-    text = "📊 <b>Финансовая сводка</b>\n\nВыберите какую сводку сформировать на текущий момент:"
+    # Strip lingering persistent reply keyboard if present in Telegram client
+    try:
+        clean_msg = await message.answer("🔄", reply_markup=ReplyKeyboardRemove())
+        await clean_msg.delete()
+    except Exception:
+        pass
+
+    text = "📊 <b>Финансовая сводка от агента</b>\n\nВыберите какую сводку сформировать:"
     kb = summary_scope_selection_keyboard()
     await message.answer(text, reply_markup=kb)
 
@@ -113,26 +119,58 @@ async def cmd_summary(message: Message, session: AsyncSession):
 async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
     """
     Step 2 of refined UX flow:
-    Handles scope selection ('sum:scope:p', 'sum:scope:f'), refresh ('sum:refresh:p', 'sum:refresh:f'),
+    Handles scope prompt ('sum:menu'), back to main menu ('sum:back:main'),
+    scope selection ('sum:scope:p', 'sum:scope:f'), refresh ('sum:refresh:p', 'sum:refresh:f'),
     and backwards-compatible legacy callbacks.
     """
-    parts = callback.data.split(":")
+    data = callback.data or ""
+    user_id = callback.from_user.id
+
+    user = await session.get(User, user_id)
+    if not user:
+        await callback.answer()
+        return
+
+    # 1. Back to Main Welcome Menu
+    if data == "sum:back:main":
+        tx_service = TransactionService(session)
+        bal_data = await tx_service.get_user_balance(user.id)
+        miniapp_url = get_miniapp_url()
+        text = BotMessages.welcome_back(
+            first_name=user.first_name,
+            currency=user.currency,
+            current_balance=bal_data["current_balance"]
+        )
+        kb = welcome_back_keyboard(miniapp_url=miniapp_url)
+        try:
+            await callback.message.edit_text(text, reply_markup=kb)
+        except Exception as exc:
+            logger.debug("Could not edit message back to main menu: %s", exc)
+        await callback.answer()
+        return
+
+    # 2. Scope Selection Prompt (from "📊 Сводка от агента" button or "🔙 Назад" from summary card)
+    if data in ("sum:menu", "sum:choose"):
+        text = "📊 <b>Финансовая сводка от агента</b>\n\nВыберите какую сводку сформировать:"
+        kb = summary_scope_selection_keyboard()
+        try:
+            await callback.message.edit_text(text, reply_markup=kb)
+        except Exception as exc:
+            logger.debug("Could not edit message to summary scope prompt: %s", exc)
+        await callback.answer()
+        return
+
+    parts = data.split(":")
     if len(parts) < 3:
         await callback.answer()
         return
 
     action = parts[1]
     scope = parts[2]
-    user_id = callback.from_user.id
 
     # Normalize scope for legacy callbacks (e.g. sum:month:p)
     if scope not in ("p", "f"):
         scope = "p"
-
-    user = await session.get(User, user_id)
-    if not user:
-        await callback.answer()
-        return
 
     report_service = ReportService(session)
     ai_service = AIService()
@@ -203,6 +241,6 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
         logger.debug("Could not edit summary message: %s", exc)
 
     if action == "refresh":
-        await callback.answer("Сводка обновлена")
+        await callback.answer("Личная сводка обновлена")
     else:
         await callback.answer()
