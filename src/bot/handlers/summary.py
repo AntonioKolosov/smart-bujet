@@ -43,22 +43,20 @@ def summary_scope_selection_keyboard() -> InlineKeyboardMarkup:
 
 def summary_card_inline_keyboard(active_scope: str) -> InlineKeyboardMarkup:
     """
-    Compact inline keyboard for current moment summary.
-    Eliminates period switcher buttons ('7 дней', 'Месяц', 'Год').
-    Allows instant refresh, one-tap toggle between personal and family views, and back navigation.
+    Compact inline keyboard for current moment summary card.
+    Eliminates refresh button. Provides one-tap toggle between personal and family views,
+    and direct button to return to the main menu.
     """
     if active_scope == "p":
         row1 = [
-            InlineKeyboardButton(text="🔄 Обновить", callback_data="sum:refresh:p"),
             InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семейная", callback_data="sum:scope:f"),
         ]
     else:
         row1 = [
-            InlineKeyboardButton(text="🔄 Обновить", callback_data="sum:refresh:f"),
             InlineKeyboardButton(text="👤 Личная", callback_data="sum:scope:p"),
         ]
     row2 = [
-        InlineKeyboardButton(text="🔙 Назад", callback_data="sum:menu"),
+        InlineKeyboardButton(text="📋 В меню", callback_data="sum:back:main"),
     ]
     return InlineKeyboardMarkup(inline_keyboard=[row1, row2])
 
@@ -68,7 +66,7 @@ def summary_no_family_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="👤 Личная", callback_data="sum:scope:p")],
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="sum:menu")],
+            [InlineKeyboardButton(text="📋 В меню", callback_data="sum:back:main")],
         ]
     )
 
