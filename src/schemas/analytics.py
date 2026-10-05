@@ -28,6 +28,19 @@ class MonthlyTrendItem(BaseModel):
     total_expense: float
     total_income: float
     net_savings: float
+    cumulative_savings: float = 0.0
+    cushion_balance: float = 0.0
+    essential_expense: float = 0.0
+    discretionary_expense: float = 0.0
+    essential_percent: float = 0.0
+    discretionary_percent: float = 0.0
+
+class SafetyCushionMetrics(BaseModel):
+    current_cushion: float
+    target_cushion_3m: float
+    target_cushion_6m: float
+    runway_months: float
+    status: str  # "healthy" | "warning" | "critical"
 
 class AnalyticsKeyMetrics(BaseModel):
     current_month_spend: float
@@ -35,10 +48,13 @@ class AnalyticsKeyMetrics(BaseModel):
     top_category_name: str | None = None
     top_category_amount: float | None = None
     top_category_percent: float | None = None
+    current_month_net_savings: float = 0.0
+    current_month_essential_percent: float = 0.0
 
 class MonthlyAnalyticsResponse(BaseModel):
     currency: str
     months_count: int
     history: list[MonthlyTrendItem]
     metrics: AnalyticsKeyMetrics
+    cushion: SafetyCushionMetrics | None = None
 

@@ -1514,6 +1514,119 @@ input[type="number"] {
   margin: 10px 0;
 }
 
+.chart-subtitle {
+  font-size: 0.72rem;
+  color: var(--hint-color);
+  margin-top: 2px;
+  display: block;
+}
+
+.chart-legend-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-size: 0.75rem;
+  color: var(--hint-color);
+}
+
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-color-box {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.legend-color-box.income-box { background: #22c55e; }
+.legend-color-box.expense-box { background: #ef4444; }
+.legend-color-box.essential-box { background: #6366f1; }
+.legend-color-box.discretionary-box { background: #f59e0b; }
+
+.legend-line-dot {
+  width: 16px;
+  height: 2px;
+  background: #38bdf8;
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.legend-line-dot::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: -3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #38bdf8;
+}
+
+.legend-dashed-line {
+  width: 18px;
+  border-top: 2px dashed #ef4444;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.cushion-stat-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.stat-pill {
+  background: rgba(255, 255, 255, 0.04);
+  padding: 8px 10px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-pill-label {
+  font-size: 0.68rem;
+  color: var(--hint-color);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.stat-pill-val {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-color);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+.rule-insight-card {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 3px solid #6366f1;
+}
+
+.rule-insight-card.healthy { border-left-color: #22c55e; }
+.rule-insight-card.warning { border-left-color: #f59e0b; }
+.rule-insight-card.critical { border-left-color: #ef4444; }
+
+body.theme-light .stat-pill {
+  background: rgba(15, 23, 42, 0.04);
+}
+body.theme-light .rule-insight-card {
+  background: #f1f5f9;
+}
+
 /* ========================================================
    High-Contrast Light Theme Overrides
    ======================================================== */

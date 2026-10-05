@@ -260,13 +260,78 @@
             <span class="metric-label">Средний расход</span>
             <span class="metric-value" id="analyticsAvgSpend">0 ₸</span>
           </div>
+          <div class="metric-card">
+            <span class="metric-label">Чистая прибыль (дельта)</span>
+            <span class="metric-value" id="analyticsNetDelta">0 ₸</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Подушка безопасности</span>
+            <span class="metric-value" id="analyticsCushionRunway">0 мес.</span>
+          </div>
           <div class="metric-card full-width">
             <span class="metric-label">Главная категория трат</span>
             <span class="metric-value" id="analyticsTopCategory">—</span>
           </div>
         </div>
 
-        <!-- Chart 1: Donut Chart - Categories Breakdown -->
+        <!-- Chart 1: Income vs. Expenses (Grouped Bar + Net Profit Line) -->
+        <div class="chart-card">
+          <div class="chart-header">
+            <div>
+              <h3 class="chart-title">Соотношение Доходов и Расходов</h3>
+              <span class="chart-subtitle">Динамика потоков и чистая прибыль (дельта)</span>
+            </div>
+            <span class="period-badge">Полгода</span>
+          </div>
+          <div class="chart-legend-row">
+            <span class="legend-chip"><span class="legend-color-box income-box"></span> Доход</span>
+            <span class="legend-chip"><span class="legend-color-box expense-box"></span> Расход</span>
+            <span class="legend-chip"><span class="legend-line-dot"></span> Чистая прибыль</span>
+          </div>
+          <div class="bar-chart-wrap" id="incomeExpenseChartContainer"></div>
+        </div>
+
+        <!-- Chart 2: Cumulative Savings & Safety Cushion -->
+        <div class="chart-card">
+          <div class="chart-header">
+            <div>
+              <h3 class="chart-title">Динамика сбережений и подушка</h3>
+              <span class="chart-subtitle">Траектория капитала и целевой резерв (3x)</span>
+            </div>
+            <span class="period-badge" id="cushionStatusBadge">Резерв</span>
+          </div>
+          <div class="cushion-stat-bar" id="cushionStatBar">
+            <div class="stat-pill">
+              <span class="stat-pill-label">Текущая подушка</span>
+              <span class="stat-pill-val" id="cushionCurrentVal">0 ₸</span>
+            </div>
+            <div class="stat-pill">
+              <span class="stat-pill-label">Цель (3 мес.)</span>
+              <span class="stat-pill-val" id="cushionTargetVal">0 ₸</span>
+            </div>
+          </div>
+          <div class="bar-chart-wrap" id="cushionChartContainer"></div>
+        </div>
+
+        <!-- Chart 3: Essential vs Discretionary Expenses (100% Stacked Bar) -->
+        <div class="chart-card">
+          <div class="chart-header">
+            <div>
+              <h3 class="chart-title">Обязательные vs Необязательные</h3>
+              <span class="chart-subtitle">Гибкость бюджета по правилу 50/30/20</span>
+            </div>
+            <span class="period-badge">Норма 50%</span>
+          </div>
+          <div class="chart-legend-row">
+            <span class="legend-chip"><span class="legend-color-box essential-box"></span> Обязательные</span>
+            <span class="legend-chip"><span class="legend-color-box discretionary-box"></span> Необязательные</span>
+            <span class="legend-chip"><span class="legend-dashed-line"></span> Лимит 50%</span>
+          </div>
+          <div class="bar-chart-wrap" id="essentialChartContainer"></div>
+          <div class="rule-insight-card" id="ruleInsightCard"></div>
+        </div>
+
+        <!-- Chart 4: Categories Breakdown Donut -->
         <div class="chart-card">
           <div class="chart-header">
             <h3 class="chart-title">Категории расходов</h3>
@@ -274,15 +339,6 @@
           </div>
           <div class="donut-chart-wrap" id="donutChartContainer"></div>
           <div class="category-legend-list" id="categoryLegendList"></div>
-        </div>
-
-        <!-- Chart 2: Bar Chart - Monthly Dynamics (6 months) -->
-        <div class="chart-card">
-          <div class="chart-header">
-            <h3 class="chart-title">Динамика расходов по месяцам</h3>
-            <span class="period-badge">Полгода</span>
-          </div>
-          <div class="bar-chart-wrap" id="barChartContainer"></div>
         </div>
       </div>
     </section>
