@@ -69,9 +69,11 @@ class TestDynamicContextService(unittest.IsolatedAsyncioTestCase):
         self.service = DynamicContextService(self.session_mock)
 
     async def test_seed_default_few_shots(self):
-        self.session_mock.scalar.return_value = None  # Table is empty
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = []
+        self.session_mock.scalars.return_value = mock_scalars
         await self.service.seed_default_few_shots()
-        self.assertTrue(self.session_mock.add.called)
+        self.assertTrue(self.session_mock.add_all.called)
         self.assertTrue(self.session_mock.commit.called)
 
     async def test_sanitize_poisoned_aliases(self):

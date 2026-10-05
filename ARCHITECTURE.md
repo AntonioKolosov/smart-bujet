@@ -1,7 +1,7 @@
 # Smart Bujet — System Architecture & Engineering Blueprint
 
-> **Specification Version**: 2.5.0  
-> **Status**: Production Deployed & Hardened  
+> **Specification Version**: 2.6.0  
+> **Status**: Production Deployed, Hardened & Agent-Enhanced  
 > **Target Audience**: Core Engineering Team, Lead System Analysts, DevOps  
 > **Repository**: `https://github.com/AntonioKolosov/smart-bujet`  
 > **Server Host**: `85.198.89.188`  
@@ -12,7 +12,7 @@
 ## 1. Executive Summary & Topology
 
 ### 1.1 Overview
-**Smart Bujet** is an intelligent personal and family financial management ecosystem powered by Google Gemini 3.8 Flash, FastAPI, aiogram 3, PostgreSQL 16, and a Telegram MiniApp. The system provides zero-friction transaction logging through multimodal inputs (natural text, in-memory voice notes, and receipt photographs) combined with dual-ledger intra-family transfer mechanics, personal deposit tracking with automated compound interest accrual, credit and liability management, interactive bot feedback with dynamic few-shot learning, and privacy-preserving shared accounting.
+**Smart Bujet** is an intelligent personal and family financial management ecosystem powered by Google Gemini 3.8 Flash, FastAPI, aiogram 3, PostgreSQL 16, and a Telegram MiniApp. The system provides zero-friction transaction logging through multimodal inputs (natural text, in-memory voice notes, and receipt photographs) combined with dual-ledger intra-family transfer mechanics, personal deposit tracking with automated compound interest accrual, credit and liability management, interactive bot feedback with dynamic few-shot learning, privacy-preserving shared accounting, and an autonomous Agent Analytics & Scoring Engine delivering periodic financial intelligence.
 
 ### 1.2 High-Level Architecture Topology
 
@@ -30,7 +30,8 @@ flowchart TD
 
     subgraph ContainerLayer ["Docker Application Network (smart_bujet_net)"]
         FASTAPI["FastAPI Core App (smart_bujet_backend:8000)<br/>• Webhook & Polling Controller<br/>• REST API v1 Engine<br/>• Static File Server (/static, /app)"]
-        SCHEDULER["Accrual Background Loop<br/>(Hourly asyncio Daemon)"]
+        SCHED_ACCRUAL["Accrual Background Loop<br/>(Hourly asyncio Daemon)"]
+        SCHED_REPORT["Report Broadcast Loop<br/>(60s asyncio Daemon)"]
     end
 
     subgraph DatabaseLayer ["Data Persistence (Host Gateway)"]
@@ -50,8 +51,11 @@ flowchart TD
     CADDY -->|"Reverse Proxy :8000"| FASTAPI
 
     FASTAPI -->|"Multimodal In-Memory Inference"| GEMINI
+    FASTAPI -->|"Agent Financial Advice Generation"| GEMINI
     FASTAPI -->|"Async Session (asyncpg)"| POSTGRES
-    SCHEDULER -->|"Month-end Accrual Check"| POSTGRES
+    SCHED_ACCRUAL -->|"Month-end Accrual Check"| POSTGRES
+    SCHED_REPORT -->|"Scheduled Broadcast Check & Logs"| POSTGRES
+    SCHED_REPORT -->|"Broadcast Dispatch (25 msg/sec)"| TELEGRAM_API
     FASTAPI -->|"Bot Push Notifications & Menu Setup"| TELEGRAM_API
 ```
 
@@ -70,6 +74,7 @@ erDiagram
     users ||--o{ credit_accounts : "incurs"
     users ||--o{ user_item_aliases : "creates"
     users ||--o{ user_classification_feedback : "submits"
+    users ||--o{ scheduled_report_logs : "receives"
     users }o--o| family_groups : "belongs to (family_group_id)"
     users ||--o{ family_groups : "owns as founder (owner_id)"
 
@@ -177,6 +182,17 @@ erDiagram
         timestamp updated_at "Updated Timestamp"
     }
 
+    scheduled_report_logs {
+        uuid id PK "Log UUID"
+        bigint user_id FK "Recipient User ID"
+        string report_type "weekly | monthly | yearly"
+        string period_key "e.g. 2026-W40 | 2026-10 | 2026"
+        string status "sent | blocked | failed"
+        text error_message "Diagnostic Exception Message"
+        timestamp created_at "Created Timestamp"
+        timestamp updated_at "Updated Timestamp"
+    }
+
     transactions {
         uuid id PK "Transaction UUID"
         bigint user_id FK "Actor User ID"
@@ -205,6 +221,7 @@ erDiagram
 2. **Dedicated Credit Management (`credit_accounts` & `credit_account_id`)**: Explicitly separates liabilities from assets. Expense transactions with `credit_account_id` record repayments, adjusting remaining debt atomically with pessimistic row-locking (`with_for_update`).
 3. **Deterministic Aliasing & Active Learning (`user_item_aliases`, `user_classification_feedback`)**: High-speed local cache for frequent items (bypasses LLM in 10-15 ms) paired with audit logs of user classification overrides (`[🔄 Это доход]` / `[🔄 Это расход]`).
 4. **Dynamic Context Few-Shots (`dynamic_few_shots`)**: Extensible repository of canonical financial interpretations injected into LLM system prompts without code re-deployment.
+5. **Scheduled Broadcast Idempotency & Delivery Audit (`scheduled_report_logs`)**: Enforces strict exactly-once delivery across weekly, monthly, and yearly scheduled report cycles via unique constraint `uq_user_report_period (user_id, report_type, period_key)`, recording client blocks (`TelegramForbiddenError`) and delivery failures.
 
 ---
 
@@ -344,6 +361,76 @@ sequenceDiagram
     Bot-->>User: "✅ Записано! (Многопозиционный чек / расход)"
 ```
 
+### 3.5 Automated Scheduled Report Broadcast & Precedence Engine
+Illustrates scheduled evaluation at 19:00 with conflict precedence, idempotency checks, token-efficient AI advice, and rate-throttled dispatch.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Scheduler as "report_scheduler_loop"
+    participant RS as "ReportService"
+    participant DB as "PostgreSQL DB"
+    participant AI as "AIService (Gemini 3.8 Flash)"
+    participant TG as "Telegram Bot API"
+
+    Note over Scheduler: Ticks every 60 seconds (checks now.hour == 19)
+    Scheduler->>Scheduler: determine_broadcast_job(now)<br/>Dec 31 -> yearly | Last day -> monthly | Sun -> weekly
+    
+    Scheduler->>DB: SELECT id FROM users WHERE is_active = true
+    DB-->>Scheduler: Active users list
+    Scheduler->>DB: SELECT user_id FROM scheduled_report_logs WHERE report_type = :type AND period_key = :key
+    DB-->>Scheduler: Already processed user IDs
+
+    loop Each Unprocessed User
+        Scheduler->>RS: get_agent_analytics(user_id, period)
+        RS->>DB: Single-pass SQL aggregation (cashflow, top cats, balances, debt, runway)
+        DB-->>RS: Raw SQL metrics
+        RS-->>Scheduler: AnalyticsSummaryData
+
+        Scheduler->>AI: generate_financial_advice(summary)
+        AI->>AI: Gemini 3.8 Flash (temperature=0.2, pre-calculated payload)
+        AI-->>Scheduler: Structured JSON {where_to_cut, where_to_save, what_to_watch}
+
+        Scheduler->>TG: send_message(user_id, formatted_summary_card, broadcast_digest_keyboard)
+        alt Success
+            Scheduler->>DB: INSERT INTO scheduled_report_logs (user_id, report_type, period_key, status='sent')
+        else TelegramForbiddenError (Bot Blocked)
+            Scheduler->>DB: INSERT INTO scheduled_report_logs (status='blocked', error_message='Bot blocked')
+        else TelegramBadRequest
+            Scheduler->>DB: INSERT INTO scheduled_report_logs (status='failed', error_message=exc)
+        end
+        Note over Scheduler: asyncio.sleep(0.04) (Throttle: 25 msg/sec)
+    end
+```
+
+### 3.6 Two-Step Agent Summary & Financial Advice Inference
+Illustrates the on-demand `/summary` UX state machine eliminating persistent reply keyboards and delivering instant response with zero initial LLM latency.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as "Telegram User"
+    participant Bot as "Bot Handler (/summary)"
+    participant DB as "PostgreSQL DB"
+    participant RS as "ReportService"
+    participant AI as "AIService"
+
+    User->>Bot: /summary (or clicks "📊 Сводка от агента")
+    Bot->>User: ReplyKeyboardRemove() (Cleans persistent bottom keyboard)
+    Bot-->>User: "📊 Выберите какую сводку сформировать:"<br/>[ 👤 Личная ] [ 👨‍👩‍👧‍👦 Семейная ]<br/>[ 🔙 Назад ]
+    Note over Bot: Zero DB / LLM latency on Step 1
+
+    User->>Bot: Clicks "[ 👤 Личная ]" (callback: sum:scope:p)
+    Bot->>RS: get_agent_analytics(user_id, scope='personal')
+    RS->>DB: Single-pass SQL metrics calculation
+    DB-->>RS: SQL metrics
+    RS-->>Bot: AnalyticsSummaryData
+
+    Bot->>AI: generate_financial_advice(summary)
+    AI-->>Bot: Financial advice JSON (with deterministic fallback)
+    Bot-->>User: Edit message: Formatted Snapshot Card<br/>[ 👨‍👩‍👧‍👦 Семейная ]<br/>[ 📋 В меню ]
+```
+
 ---
 
 ## 4. Complete REST API Endpoint Catalog (`/api/v1/*`)
@@ -407,24 +494,30 @@ All API routes require authentication via header `X-Telegram-Init-Data` validate
 ### 4.8 Webhook (`/api/v1/webhook`)
 | Method | Endpoint | Description | Request Body / Params | Response |
 | :--- | :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/webhook` | Telegram Bot API Webhook Ingress (constant-time validation) | Header: `X-Telegram-Bot-Api-Secret-Token` | `{"status": "ok"}` |
+| `POST` | `/api/v1/webhook` | Telegram Bot API Webhook Ingress (timing-attack resistant) | Header: `X-Telegram-Bot-Api-Secret-Token` | `{"status": "ok"}` |
 
 ---
 
 ## 5. Service Layer Specifications & Business Rules
 
 ```
-src/services/
-├── ai_service.py              # Gemini 3.8 Flash multimodal parsing & restaurant aggregation
-├── asset_service.py           # Personal assets & monthly compound interest accrual
-├── category_service.py        # System seeding & custom category taxonomy
-├── credit_service.py          # Credit lifecycle, debt summary & heuristic resolution
-├── discount_service.py        # Hamilton Largest Remainder discount distribution
-├── dynamic_context_service.py # Few-shot retrieval, prompt injection & alias sanitization
-├── family_service.py          # Family state, onboarding deep links & intercompany elimination
-├── parser_service.py          # Heuristic regex parsing
-├── report_service.py          # Donut & Bar chart analytics aggregations
-└── transaction_service.py     # Central orchestrator, CRUD lifecycle, ACID rollback & privacy masking
+src/
+├── core/
+│   ├── accrual_scheduler.py       # Hourly compound interest accrual loop
+│   ├── report_scheduler.py        # 60s trigger loop for scheduled weekly/monthly/yearly reports
+│   ├── database.py                # Async SQLAlchemy engine & session factory
+│   └── security.py                # HMAC initData validation & timing-attack resistant comparisons
+└── services/
+    ├── ai_service.py              # Gemini 3.8 Flash multimodal parsing, dining aggregation & AI advisor
+    ├── asset_service.py           # Personal assets & monthly compound interest accrual
+    ├── category_service.py        # System seeding & custom category taxonomy
+    ├── credit_service.py          # Credit lifecycle, debt summary & heuristic resolution
+    ├── discount_service.py        # Hamilton Largest Remainder discount distribution
+    ├── dynamic_context_service.py # Few-shot retrieval, prompt injection & alias sanitization
+    ├── family_service.py          # Family state, onboarding deep links & intercompany elimination
+    ├── parser_service.py          # Heuristic regex parsing
+    ├── report_service.py          # Donut & Bar chart analytics aggregations & get_agent_analytics
+    └── transaction_service.py     # Central orchestrator, CRUD lifecycle, ACID rollback & privacy masking
 ```
 
 ### 5.1 Financial Invariants & Integrity Rules
@@ -452,6 +545,17 @@ Deleting a transaction strictly reverses its financial effects:
 
 #### Invariant 5: Universal Privacy Masking
 In all responses exposing family transactions, asset account operations are sanitized to `"Пополнение депозита"`, `"Снятие с депозита"`, or `"Проценты по вкладу"`, and `raw_text` is suppressed (`null`) for non-owners.
+
+#### Invariant 6: Scheduled Broadcast Idempotency & Precedence
+Automated broadcast jobs trigger strictly at 19:00 local time with the precedence rule:
+$$\text{Yearly (Dec 31)} \succ \text{Monthly (Last Calendar Day)} \succ \text{Weekly (Sunday)}$$
+Execution is guaranteed idempotent via database-level uniqueness on `(user_id, report_type, period_key)` in `scheduled_report_logs`.
+
+#### Invariant 7: Autonomous Financial Advisory Integrity
+The AI Financial Advisor never performs financial calculations. Arithmetic aggregations are computed strictly via single-pass SQL in `ReportService.get_agent_analytics()`. The LLM receives pre-calculated parameters and acts solely as a natural-language strategist producing structured JSON advice, with a deterministic rule-based fallback if the API is unreachable.
+
+#### Invariant 8: Media Group Batch Receipt Atomicity & Debouncing
+When multiple receipt photos are dispatched in a Telegram Media Group album (`media_group_id`), an asyncio debounce buffer aggregates all album messages into a single leader task. Receipts are parsed concurrently via `AIService.parse_receipt_photos()` and committed atomically in `TransactionService.process_receipt_photos()` in a single database transaction, dispatching a consolidated summary (`BotMessages.receipt_batch_success()`) with zero split responses and zero database race conditions. Single photo submissions bypass debouncing with zero latency overhead.
 
 ---
 
@@ -509,7 +613,7 @@ graph TD
 | Container | Image | Host Port | Internal Port | Memory Limit | CPU Limit | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `smart_bujet_caddy` | `caddy:2-alpine` | `80`, `8443` | `80`, `443` | 64 MB | 0.20 | Reverse proxy & TLS termination |
-| `smart_bujet_backend` | `smart-bujet-backend:latest` | None | `8000` | 240 MB | 0.40 | FastAPI + aiogram 3 backend |
+| `smart_bujet_backend` | `smart-bujet-backend:latest` | None | `8000` | 240 MB | 0.40 | FastAPI + aiogram 3 backend (API, Accrual & Report loops) |
 | *Host Process* | `nineseconds/mtg:2` | `443` | `443` | - | - | **MTProto Telegram Proxy (Protected)** |
 | *Host Process* | `postgres:16` | `5432` | `5432` | - | - | PostgreSQL 16 Database Server |
 
@@ -524,6 +628,8 @@ graph TD
 - [x] **XSS Mitigation**: Contextual HTML escaping (`escapeHtml`) across all client rendering paths.
 - [x] **Data Isolation**: Strict user-level scoping on asset and credit entities.
 - [x] **Pessimistic Locking**: `select(...).with_for_update()` applied on concurrent financial operations.
+- [x] **Delivery Idempotency**: `ScheduledReportLog` with compound unique constraint preventing duplicate broadcasts.
+- [x] **Telegram Throttle**: Broadcast rate-limited to 25 messages/second with client exception isolation.
 
 ---
 
@@ -547,13 +653,29 @@ C:\Users\aanto\smart-bujet\
 │   ├── test_privacy_and_isolation.py # Automated test verifying isolation & masking
 │   └── run_reports.py            # CLI script to generate & dispatch periodic reports
 └── src/
-    ├── main.py                   # FastAPI application lifespan & entry point
+    ├── main.py                   # FastAPI lifespan, background daemons & bot commands
     ├── api/                      # REST API routes and dependencies
     ├── bot/                      # aiogram 3 bot routers, handlers, and keyboards
-    ├── core/                     # Configuration, database engine, security, scheduler
-    ├── models/                   # SQLAlchemy declarative data models
+    │   ├── handlers/
+    │   │   ├── start.py          # /start, deep linking & currency configuration
+    │   │   ├── summary.py        # 2-step agent summary state machine & digest keyboards
+    │   │   ├── tx_actions.py     # Inline feedback toggles & classification healing
+    │   │   └── voice_tx.py       # In-memory voice note processing
+    ├── core/                     # Configuration, database engine, security, schedulers
+    │   ├── accrual_scheduler.py  # Hourly deposit compound interest accrual loop
+    │   ├── report_scheduler.py   # 60s trigger loop for scheduled weekly/monthly/yearly reports
+    │   ├── database.py           # Engine & async sessionmaker
+    │   └── security.py           # InitData & constant-time digests
+    ├── models/                   # Declarative SQLAlchemy data models
+    │   ├── credit.py             # CreditAccount entity
+    │   ├── report_log.py         # ScheduledReportLog entity
+    │   └── transaction.py        # Transaction entity
     ├── schemas/                  # Pydantic validation & response schemas
     ├── services/                 # Core domain business logic services
+    │   ├── ai_service.py         # Multimodal parsing & token-efficient financial advice
+    │   ├── credit_service.py     # Credit lifecycle, heuristic resolution & repayment
+    │   ├── report_service.py     # SQL single-pass analytics & chart data
+    │   └── transaction_service.py# CRUD orchestrator & ACID rollback engine
     └── static/                   # Telegram MiniApp SPA (HTML, CSS, JS)
 ```
 
@@ -583,7 +705,7 @@ python -m scripts.test_privacy_and_isolation
 # Reset family group to single_member mode for onboarding testing
 python -m scripts.reset_family_flow
 
-# Generate and send weekly report
+# Generate and send periodic report CLI
 python -m scripts.run_reports --period week
 ```
 
@@ -604,4 +726,4 @@ docker compose logs -f caddy
 
 ---
 
-*Architectural Blueprint v2.5.0 approved and certified for GitHub repository documentation.*
+*Architectural Blueprint v2.6.0 approved and certified for GitHub repository documentation.*

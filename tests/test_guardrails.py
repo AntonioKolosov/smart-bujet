@@ -66,6 +66,8 @@ class TestGuardrailsTransactionService(unittest.IsolatedAsyncioTestCase):
         service = TransactionService(session=self.session_mock, ai_service=ai_mock)
         service.category_service.get_categories = AsyncMock(return_value=[])
         service.asset_service.get_accessible_assets = AsyncMock(return_value=[])
+        service.credit_service.get_user_credits = AsyncMock(return_value=[])
+        service.dynamic_service.get_few_shots_for_query = AsyncMock(return_value=[])
 
         with self.assertRaises(OffTopicMessageError):
             await service.process_text(user_id=123, text="Какая сегодня погода в Алматы?")
@@ -80,6 +82,8 @@ class TestGuardrailsTransactionService(unittest.IsolatedAsyncioTestCase):
         service = TransactionService(session=self.session_mock, ai_service=ai_mock)
         service.category_service.get_categories = AsyncMock(return_value=[])
         service.asset_service.get_accessible_assets = AsyncMock(return_value=[])
+        service.credit_service.get_user_credits = AsyncMock(return_value=[])
+        service.dynamic_service.get_few_shots_for_query = AsyncMock(return_value=[])
 
         with self.assertRaises(OffTopicMessageError):
             await service.process_voice(user_id=123, audio_bytes=b"dummy_ogg_audio")

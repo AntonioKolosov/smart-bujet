@@ -122,7 +122,9 @@ class TransactionService:
             return partner
 
         if partner.first_name and len(partner.first_name.strip()) >= 2:
-            if partner.first_name.strip().lower() in combined_text:
+            fname = partner.first_name.strip().lower()
+            stem = fname[:-1] if len(fname) >= 4 and fname[-1] in "аяеиуыо" else fname
+            if fname in combined_text or (len(stem) >= 3 and stem in combined_text):
                 return partner
 
         if partner.username and len(partner.username.strip()) >= 2:
@@ -619,27 +621,18 @@ class TransactionService:
         await self.session.commit()
         return transactions
 
-    async def process_receipt_photo(
+    async def _build_transactions_from_receipt_payload(
         self,
+        payload: dict[str, Any],
         user_id: int,
-        image_bytes: bytes,
-        mime_type: str = "image/jpeg"
-    ) -> list[Transaction]:
-        """Process receipt photo in-memory without saving image to disk."""
-        user = await self.session.get(User, user_id)
-        family_group_id = user.family_group_id if user else None
-
-        available_cats = await self.category_service.get_categories(user_id)
-        cat_names = list({c.name for c in available_cats})
-
-        payload = await self.ai_service.parse_receipt_photo(image_bytes, mime_type, cat_names)
-        if payload.get("is_financial") is False:
-            raise OffTopicMessageError("На фотографии не обнаружен кассовый чек", raw_text=None)
+        family_group_id: Any,
+        resolver: BatchCategoryResolver,
+        fallback_index: int = 1
+    ) -> tuple[list[Transaction], str]:
         raw_items = payload.get("items", [])
         if not raw_items:
-            raise TransactionParseError("Could not parse receipt photo")
+            return [], ""
 
-        # Safeguard: Deterministic aggregation fallback for dining establishments
         est_type = str(payload.get("establishment_type") or "").lower()
         venue_name = payload.get("venue_name")
         dining_keywords = ("кафе", "cafe", "ресторан", "rest", "кофейн", "coffee", "бар", "bar", "pub", "паб", "додо", "burger", "пицц", "столов", "kfc", "mcdonald")
@@ -648,6 +641,10 @@ class TransactionService:
             or (venue_name and any(k in str(venue_name).lower() for k in dining_keywords))
             or (len(raw_items) > 1 and all(it.get("category") in ("Еда вне дома", "Кафе и рестораны") for it in raw_items))
         )
+
+        receipt_title = ""
+        if venue_name and str(venue_name).strip():
+            receipt_title = str(venue_name).strip()
 
         if is_dining and len(raw_items) > 1:
             total_sum = Decimal(str(payload.get("total_paid") or 0))
@@ -673,8 +670,6 @@ class TransactionService:
         )
 
         transactions: list[Transaction] = []
-
-        resolver = BatchCategoryResolver(self, user_id)
 
         for item in raw_items:
             try:
@@ -711,11 +706,135 @@ class TransactionService:
             await resolver.record_alias(normalized_name, category)
             transactions.append(tx)
 
+        if not receipt_title:
+            if is_dining:
+                receipt_title = "Кафе"
+            elif len(transactions) == 1:
+                receipt_title = transactions[0].item_name
+            else:
+                receipt_title = f"Чек {fallback_index}"
+
+        return transactions, receipt_title
+
+    async def process_receipt_photo(
+        self,
+        user_id: int,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg"
+    ) -> list[Transaction]:
+        """Process receipt photo in-memory without saving image to disk."""
+        user = await self.session.get(User, user_id)
+        family_group_id = user.family_group_id if user else None
+
+        available_cats = await self.category_service.get_categories(user_id)
+        cat_names = list({c.name for c in available_cats})
+
+        payload = await self.ai_service.parse_receipt_photo(image_bytes, mime_type, cat_names)
+        if payload.get("is_financial") is False:
+            raise OffTopicMessageError("На фотографии не обнаружен кассовый чек", raw_text=None)
+        if not payload.get("items"):
+            raise TransactionParseError("Could not parse receipt photo")
+
+        resolver = BatchCategoryResolver(self, user_id)
+        transactions, _ = await self._build_transactions_from_receipt_payload(
+            payload=payload,
+            user_id=user_id,
+            family_group_id=family_group_id,
+            resolver=resolver,
+            fallback_index=1
+        )
+
         if not transactions:
             raise InvalidTransactionAmountError("Amount must be greater than 0")
 
         await self.session.commit()
         return transactions
+
+    async def process_receipt_photos(
+        self,
+        user_id: int,
+        images: list[bytes],
+        mime_type: str = "image/jpeg"
+    ) -> dict[str, Any]:
+        """
+        Process a batch of receipt photos concurrently:
+        - Concurrently parses all receipt photos via AIService.
+        - Resolves items and categories for each receipt.
+        - Persists all transactions atomically in a single DB commit.
+        - Returns a structured summary of processed receipts and total stats.
+        """
+        if not images:
+            raise TransactionParseError("No images provided")
+
+        user = await self.session.get(User, user_id)
+        family_group_id = user.family_group_id if user else None
+
+        available_cats = await self.category_service.get_categories(user_id)
+        cat_names = list({c.name for c in available_cats})
+
+        parse_tasks = [
+            self.ai_service.parse_receipt_photo(img, mime_type, cat_names)
+            for img in images
+        ]
+        raw_payloads = await asyncio.gather(*parse_tasks, return_exceptions=True)
+
+        resolver = BatchCategoryResolver(self, user_id)
+        receipts_summary: list[dict[str, Any]] = []
+        all_transactions: list[Transaction] = []
+        off_topic_count = 0
+        error_count = 0
+
+        for idx, payload in enumerate(raw_payloads, start=1):
+            if isinstance(payload, Exception):
+                logger.warning("Error parsing receipt photo #%d: %s", idx, payload)
+                error_count += 1
+                continue
+
+            if not isinstance(payload, dict):
+                error_count += 1
+                continue
+
+            if payload.get("is_financial") is False:
+                off_topic_count += 1
+                continue
+
+            txs, receipt_title = await self._build_transactions_from_receipt_payload(
+                payload=payload,
+                user_id=user_id,
+                family_group_id=family_group_id,
+                resolver=resolver,
+                fallback_index=len(receipts_summary) + 1
+            )
+            if not txs:
+                error_count += 1
+                continue
+
+            receipt_total = sum(Decimal(str(tx.amount)) for tx in txs)
+            receipts_summary.append({
+                "receipt_index": len(receipts_summary) + 1,
+                "title": receipt_title,
+                "total_amount": float(receipt_total),
+                "items_count": len(txs),
+                "transactions": txs
+            })
+            all_transactions.extend(txs)
+
+        if not all_transactions:
+            if off_topic_count > 0 and off_topic_count == len(images):
+                raise OffTopicMessageError("На фотографиях не обнаружены кассовые чеки", raw_text=None)
+            raise TransactionParseError("Could not parse receipt photos")
+
+        await self.session.commit()
+
+        total_amount = sum(Decimal(str(tx.amount)) for tx in all_transactions)
+        return {
+            "receipts": receipts_summary,
+            "all_transactions": all_transactions,
+            "total_amount": float(total_amount),
+            "total_operations": len(all_transactions),
+            "processed_count": len(receipts_summary),
+            "failed_count": error_count + off_topic_count,
+        }
 
     async def get_user_balance(self, user_id: int) -> dict:
         """Calculate live account balance and monthly metrics."""

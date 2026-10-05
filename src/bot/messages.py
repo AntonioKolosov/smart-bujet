@@ -115,6 +115,30 @@ class BotMessages:
         return "\n".join(lines)
 
     @staticmethod
+    def receipt_batch_success(
+        receipts: list[dict[str, Any]],
+        total_operations: int,
+        total_amount: float,
+        currency: str = "RUB",
+        current_balance: float | None = None
+    ) -> str:
+        lines = [f"🧾 <b>Обработано чеков: {len(receipts)}</b>\n"]
+        for i, r in enumerate(receipts, start=1):
+            title = r.get("title", f"Чек {i}")
+            amt = format_amount(r.get("total_amount", 0.0), currency)
+            if title and title.lower() != "чек" and not title.lower().startswith(f"чек {i}"):
+                lines.append(f"• Чек {i}: <b>{title}</b> ({amt})")
+            else:
+                lines.append(f"• Чек {i} ({amt})")
+
+        lines.append("")
+        lines.append(f"💰 <b>Всего добавлено операций: {total_operations} на сумму: {format_amount(total_amount, currency)}</b>")
+        if current_balance is not None:
+            lines.append(f"💳 <b>Текущий баланс: {format_amount(current_balance, currency)}</b>")
+
+        return "\n".join(lines)
+
+    @staticmethod
     def voice_clarification(recognized_text: str | None = None) -> str:
         if recognized_text:
             return (

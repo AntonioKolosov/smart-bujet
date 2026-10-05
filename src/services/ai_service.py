@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import asyncio
 from decimal import Decimal
 from typing import Any
 try:
@@ -308,6 +309,18 @@ class AIService:
         except Exception as exc:
             logger.error("AI parse_receipt_photo failed: %s", exc)
             return {"is_financial": True, "items": []}
+
+    async def parse_receipt_photos(
+        self,
+        images: list[bytes],
+        mime_type: str,
+        categories: list[str]
+    ) -> list[dict[str, Any]]:
+        """Concurrent parsing of multiple receipt photos."""
+        if not images:
+            return []
+        tasks = [self.parse_receipt_photo(img, mime_type, categories) for img in images]
+        return await asyncio.gather(*tasks)
 
     async def generate_financial_advice(self, summary: Any) -> dict[str, str]:
         """

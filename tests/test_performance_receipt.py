@@ -140,6 +140,9 @@ class TestPerformanceReceiptAndVoice(unittest.IsolatedAsyncioTestCase):
             return [category_mock]
 
         transaction_service.category_service.get_categories = AsyncMock(side_effect=mock_get_categories)
+        transaction_service.asset_service.get_accessible_assets = AsyncMock(return_value=[])
+        transaction_service.credit_service.get_user_credits = AsyncMock(return_value=[])
+        transaction_service.dynamic_service.get_few_shots_for_query = AsyncMock(return_value=[])
         transaction_service._save_alias = AsyncMock(return_value=None)
         transaction_service._get_alias_category = AsyncMock(return_value=None)
         transaction_service._resolve_category = AsyncMock(return_value=category_mock)
