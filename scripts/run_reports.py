@@ -4,38 +4,38 @@ from sqlalchemy import select
 from src.core.database import async_session_maker
 from src.models.user import User
 from src.services.report_service import ReportService
+from src.services.ai_service import AIService
+from src.bot.messages import format_summary_card
+from src.bot.handlers.summary import summary_inline_keyboard
 from src.bot.bot import bot
 
 
 async def run_reports(period: str = "week"):
-    print(f"Generating and dispatching {period} reports...")
+    print(f"Generating and dispatching {period} reports with agent analytics...")
+    ai_service = AIService()
     async with async_session_maker() as session:
         users = (await session.scalars(select(User).where(User.is_active == True))).all()
         report_service = ReportService(session)
 
         for user in users:
-            summary = await report_service.get_summary(
+            summary = await report_service.get_agent_analytics(
                 user_id=user.id,
-                family_group_id=user.family_group_id,
                 period=period
             )
 
-            if summary["total_income"] == 0 and summary["total_expense"] == 0:
+            if summary.total_income == 0 and summary.total_expense == 0 and summary.total_deposit_balance == 0 and summary.total_credit_debt == 0:
                 continue
 
-            period_title = {"week": "Недельный", "month": "Месячный", "year": "Годовой"}.get(period, period)
-            cats_text = "\n".join([f"• {c['category']}: {c['total']:,.2f} {user.currency}" for c in summary["categories"][:5]])
-
-            msg = (
-                f"📊 <b>{period_title} финансовый отчёт</b>\n\n"
-                f"📈 Доходы: <b>+{summary['total_income']:,.2f} {user.currency}</b>\n"
-                f"📉 Расходы: <b>-{summary['total_expense']:,.2f} {user.currency}</b>\n"
-                f"⚖️ Баланс: <b>{summary['balance']:,.2f} {user.currency}</b>\n\n"
-                f"<b>Топ категорий расходов:</b>\n{cats_text or 'Нет расходов'}"
+            advice = await ai_service.generate_financial_advice(summary)
+            msg = "🔔 <b>Плановая сводка от Smart Bujet</b>\n\n" + format_summary_card(summary, advice)
+            kb = summary_inline_keyboard(
+                active_period=period,
+                active_scope="p",
+                has_family=bool(user.family_group_id)
             )
 
             try:
-                await bot.send_message(chat_id=user.id, text=msg)
+                await bot.send_message(chat_id=user.id, text=msg, reply_markup=kb)
                 print(f"Sent {period} report to user {user.id}")
             except Exception as e:
                 print(f"Failed to send report to user {user.id}: {e}")
@@ -46,4 +46,3 @@ if __name__ == "__main__":
     parser.add_argument("--period", choices=["week", "month", "year"], default="week")
     args = parser.parse_args()
     asyncio.run(run_reports(period=args.period))
-

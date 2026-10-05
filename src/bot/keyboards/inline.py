@@ -23,7 +23,10 @@ def welcome_back_keyboard(miniapp_url: str | None = None) -> InlineKeyboardMarku
             InlineKeyboardButton(text="💳 Кредиты", web_app=WebAppInfo(url=credits_url)),
             InlineKeyboardButton(text="📊 Аналитика", web_app=WebAppInfo(url=analytics_url)),
         ])
-    rows.append([InlineKeyboardButton(text="💱 Изменить валюту", callback_data="change_currency")])
+    rows.append([
+        InlineKeyboardButton(text="📊 Сводка от агента", callback_data="sum:month:p"),
+        InlineKeyboardButton(text="💱 Изменить валюту", callback_data="change_currency"),
+    ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def analytics_keyboard(analytics_url: str) -> InlineKeyboardMarkup:

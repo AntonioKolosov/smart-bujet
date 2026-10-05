@@ -309,4 +309,132 @@ class AIService:
             logger.error("AI parse_receipt_photo failed: %s", exc)
             return {"is_financial": True, "items": []}
 
+    async def generate_financial_advice(self, summary: Any) -> dict[str, str]:
+        """
+        Generates compact, high-precision financial recommendations using Gemini 3.8 Flash.
+        Falls back gracefully to deterministic rule-based advice on any failure.
+        """
+        if not self.client:
+            return self._generate_rule_based_advice(summary)
+
+        payload = {
+            "period": getattr(summary, "period", "month"),
+            "period_label": getattr(summary, "period_label", ""),
+            "currency": getattr(summary, "currency", "KZT"),
+            "income": getattr(summary, "total_income", 0.0),
+            "expense": getattr(summary, "total_expense", 0.0),
+            "net_savings": getattr(summary, "net_savings", 0.0),
+            "saving_rate_pct": getattr(summary, "saving_rate", 0.0),
+            "top_category": getattr(summary, "top_category_name", None),
+            "top_category_amount": getattr(summary, "top_category_amount", 0.0),
+            "top_category_share_pct": getattr(summary, "top_category_share", 0.0),
+            "top_3_categories": [
+                {"name": c.get("name"), "amount": c.get("amount"), "share": c.get("share")}
+                for c in getattr(summary, "top_categories", [])[:3]
+            ],
+            "liquid_balance": getattr(summary, "current_liquid_balance", 0.0),
+            "deposit_balance": getattr(summary, "total_deposit_balance", 0.0),
+            "credit_debt": getattr(summary, "total_credit_debt", 0.0),
+            "monthly_credit_payment": getattr(summary, "monthly_credit_payment", 0.0),
+            "debt_burden_pct": getattr(summary, "debt_burden_ratio", 0.0),
+            "runway_months": getattr(summary, "runway_months", 0.0),
+            "is_family": getattr(summary, "is_family", False)
+        }
+
+        prompt = (
+            "Ты — персональный финансовый консультант Smart Bujet.\n"
+            "На основе готовых рассчитанных показателей пользователя сформируй строго 3 персональные рекомендации.\n"
+            "Не пересчитывай цифры, они проверены в SQL. Не используй общие фразы — дай конкретные советы с цифрами.\n\n"
+            f"ФИНАНСОВЫЙ СРЕЗ:\n{json.dumps(payload, ensure_ascii=False)}\n\n"
+            "ФОРМАТ ОТВЕТА (СТРОГО JSON):\n"
+            "{\n"
+            '  "where_to_cut": "1-2 емких предложения: где именно сократить расходы исходя из топ-категорий",\n'
+            '  "where_to_save": "1-2 емких предложения: куда направить свободные средства (депозит под проценты, подушка, досрочное погашение кредита)",\n'
+            '  "what_to_watch": "1-2 емких предложения: на что обратить внимание (размер подушки безопасности, кредитная нагрузка, темп трат)"\n'
+            "}"
+        )
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.2
+                )
+            )
+            data = json.loads(response.text.strip())
+            return {
+                "where_to_cut": data.get("where_to_cut") or self._fallback_cut(summary),
+                "where_to_save": data.get("where_to_save") or self._fallback_save(summary),
+                "what_to_watch": data.get("what_to_watch") or self._fallback_watch(summary),
+            }
+        except Exception as exc:
+            logger.warning("AI generate_financial_advice fallback triggered: %s", exc)
+            return self._generate_rule_based_advice(summary)
+
+    def _generate_rule_based_advice(self, summary: Any) -> dict[str, str]:
+        """Deterministic offline rule-based scoring engine."""
+        return {
+            "where_to_cut": self._fallback_cut(summary),
+            "where_to_save": self._fallback_save(summary),
+            "what_to_watch": self._fallback_watch(summary),
+        }
+
+    @staticmethod
+    def _fallback_cut(s: Any) -> str:
+        top_cat = getattr(s, "top_category_name", None)
+        share = getattr(s, "top_category_share", 0.0)
+        amt = getattr(s, "top_category_amount", 0.0)
+        curr = getattr(s, "currency", "KZT")
+        if top_cat and share > 25.0:
+            reduction = round(amt * 0.15, 0)
+            return (
+                f"Наибольшая доля расходов приходится на «{top_cat}» ({share}%). "
+                f"Сократив эти траты на 15%, вы сохраните около {reduction:,.0f} {curr}."
+            )
+        return "Оптимизируйте мелкие повседневные спонтанные траты и подписки для роста свободных средств."
+
+    @staticmethod
+    def _fallback_save(s: Any) -> str:
+        debt = getattr(s, "total_credit_debt", 0.0)
+        savings = getattr(s, "net_savings", 0.0)
+        curr = getattr(s, "currency", "KZT")
+        if debt > 0 and savings > 0:
+            return (
+                f"При свободном остатке {savings:,.0f} {curr} направьте часть на досрочное погашение "
+                f"кредита (остаток {debt:,.0f} {curr}), чтобы сэкономить на процентах."
+            )
+        elif savings > 0:
+            return (
+                f"Свободный профицит {savings:,.0f} {curr} рекомендуется перевести на вклад или накопительный "
+                f"счет для капитализации процентов."
+            )
+        return "Сформируйте резерв: откладывайте минимум 10% от любого входящего дохода до совершения трат."
+
+    @staticmethod
+    def _fallback_watch(s: Any) -> str:
+        runway = getattr(s, "runway_months", 0.0)
+        debt_burden = getattr(s, "debt_burden_ratio", 0.0)
+        rate = getattr(s, "saving_rate", 0.0)
+        savings = getattr(s, "net_savings", 0.0)
+        curr = getattr(s, "currency", "KZT")
+        if runway < 1.0:
+            return (
+                f"Внимание: финансовая подушка менее 1 месяца ({runway:.1f} мес.). "
+                f"Приоритет номер один — сформировать неприкосновенный резерв на 3 месяца расходов."
+            )
+        elif debt_burden > 35.0:
+            return (
+                f"Кредитная нагрузка высока ({debt_burden}% от дохода). "
+                f"Не берите новые обязательства до снижения долгового бремени."
+            )
+        elif rate < 0:
+            return (
+                f"Расходы превысили доходы за период на {abs(savings):,.0f} {curr}. "
+                f"Необходимо пересмотреть траты для возврата в профицит."
+            )
+        return f"Отличный темп: норма сбережений {rate}%. Подушка безопасности закрывает {runway:.1f} мес."
+
+
 

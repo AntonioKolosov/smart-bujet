@@ -17,6 +17,7 @@ from src.bot.keyboards.inline import (
 from src.bot.messages import BotMessages
 from src.services.transaction_service import TransactionService
 from src.services.family_service import FamilyService
+from src.bot.handlers.summary import summary_reply_keyboard
 
 router = Router()
 
@@ -141,6 +142,10 @@ async def cmd_start(message: Message, session: AsyncSession, command: CommandObj
             current_balance=bal_data["current_balance"]
         ),
         reply_markup=welcome_back_keyboard(miniapp_url=miniapp_url)
+    )
+    await message.answer(
+        "💡 Для быстрой финансовой аналитики и рекомендаций нажмите кнопку «📊 Сводка»:",
+        reply_markup=summary_reply_keyboard()
     )
 
 @router.callback_query(F.data == "change_currency")

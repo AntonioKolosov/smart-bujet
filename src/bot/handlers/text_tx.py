@@ -8,6 +8,7 @@ from src.core.exceptions import InvalidTransactionAmountError, TransactionParseE
 from src.models.user import User
 from src.bot.messages import BotMessages
 from src.bot.keyboards.inline import tx_toggle_keyboard
+from src.bot.handlers.summary import summary_reply_keyboard
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -50,7 +51,10 @@ async def process_text_transaction(message: Message, session: AsyncSession):
         if parsed_amount is not None:
             user.initial_balance = parsed_amount
             await session.commit()
-            await message.reply(BotMessages.initial_balance_set(parsed_amount, user.currency))
+            await message.reply(
+                BotMessages.initial_balance_set(parsed_amount, user.currency),
+                reply_markup=summary_reply_keyboard()
+            )
             return
         await message.reply(BotMessages.guard_set_balance_first())
         return

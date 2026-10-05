@@ -230,3 +230,59 @@ class BotMessages:
     def currency_updated(currency: str) -> str:
         symbol = get_currency_symbol(currency)
         return f"✅ Валюта успешно установлена: <b>{currency} ({symbol})</b>"
+
+
+def format_summary_card(
+    summary: Any,
+    advice: dict[str, str] | None = None
+) -> str:
+    curr = getattr(summary, "currency", "KZT")
+    scope_title = "👨‍👩‍👧‍👦 Семейная" if getattr(summary, "is_family", False) else "👤 Личная"
+    net_savings = getattr(summary, "net_savings", 0.0)
+    sign = "+" if net_savings >= 0 else ""
+    saving_rate = getattr(summary, "saving_rate", 0.0)
+
+    lines = [
+        f"📊 <b>Финансовая сводка ({scope_title})</b>",
+        f"📅 Период: <b>{getattr(summary, 'period_label', '')}</b>",
+        "━━━━━━━━━━━━━━━━━━━━━",
+        f"💸 <b>Расходы:</b> {format_amount(getattr(summary, 'total_expense', 0.0), curr)}",
+        f"💰 <b>Доходы:</b> {format_amount(getattr(summary, 'total_income', 0.0), curr)}",
+        f"📈 <b>Чистый результат:</b> {sign}{format_amount(net_savings, curr)} (сбережения {saving_rate}%)",
+        ""
+    ]
+
+    top_cat_name = getattr(summary, "top_category_name", None)
+    if top_cat_name:
+        top_cat_amount = getattr(summary, "top_category_amount", 0.0)
+        top_cat_share = getattr(summary, "top_category_share", 0.0)
+        lines.extend([
+            "🏆 <b>Главная категория трат:</b>",
+            f"• <b>{top_cat_name}</b>: {format_amount(top_cat_amount, curr)} (<b>{top_cat_share}%</b> от всех трат)",
+            ""
+        ])
+
+    liquid = getattr(summary, "current_liquid_balance", 0.0)
+    deposits = getattr(summary, "total_deposit_balance", 0.0)
+    credits = getattr(summary, "total_credit_debt", 0.0)
+    runway = getattr(summary, "runway_months", 0.0)
+
+    lines.extend([
+        "💼 <b>Активы и обязательства:</b>",
+        f"• 💳 На карте / текущий баланс: <b>{format_amount(liquid, curr)}</b>",
+        f"• 🏦 Депозиты и сбережения: <b>{format_amount(deposits, curr)}</b>",
+        f"• 💳 Остаток долга по кредитам: <b>{format_amount(credits, curr)}</b>",
+        f"• 🛡️ Подушка безопасности: <b>{runway:.1f} мес.</b>",
+    ])
+
+    if advice:
+        lines.extend([
+            "━━━━━━━━━━━━━━━━━━━━━",
+            "🤖 <b>Рекомендации Smart Bujet:</b>",
+            f"✂️ <b>Где ужаться:</b> {advice.get('where_to_cut', '')}",
+            f"📥 <b>Куда отложить:</b> {advice.get('where_to_save', '')}",
+            f"⚠️ <b>Обратить внимание:</b> {advice.get('what_to_watch', '')}"
+        ])
+
+    return "\n".join(lines)
+

@@ -16,6 +16,7 @@ from src.services.category_service import CategoryService
 from src.services.dynamic_context_service import DynamicContextService
 
 from src.core.accrual_scheduler import accrual_background_loop
+from src.core.report_scheduler import report_scheduler_background_loop
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ async def lifespan(app: FastAPI):
                 )
             )
             await bot.set_my_commands([
+                BotCommand(command="summary", description="📊 Финансовая сводка и советы"),
                 BotCommand(command="miniapp", description="Открыть журнал транзакций"),
                 BotCommand(command="deposits", description="Депозиты и сбережения"),
                 BotCommand(command="credits", description="Кредиты и займы"),
@@ -79,8 +81,9 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("Could not set chat menu button or commands: %s", exc)
 
-    # Start monthly deposit interest accrual background scheduler
+    # Start deposit interest accrual and scheduled report broadcast schedulers
     accrual_task = asyncio.create_task(accrual_background_loop(async_session_maker))
+    report_task = asyncio.create_task(report_scheduler_background_loop(async_session_maker, bot))
 
     polling_task = None
     if is_real_token and settings.domain and settings.domain != "localhost" and ":" not in settings.domain:
@@ -92,6 +95,7 @@ async def lifespan(app: FastAPI):
     yield
 
     accrual_task.cancel()
+    report_task.cancel()
     if polling_task:
         polling_task.cancel()
     elif is_real_token and settings.domain and settings.domain != "localhost":
