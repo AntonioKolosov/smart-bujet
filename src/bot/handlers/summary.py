@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user import User
 from src.services.report_service import ReportService
-from src.services.family_service import FamilyService
 from src.services.ai_service import AIService
 from src.services.transaction_service import TransactionService
 from src.bot.messages import BotMessages, format_summary_card
@@ -183,24 +182,14 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
             has_partner = (count_res or 0) >= 2
 
         if not has_partner:
-            fam_service = FamilyService(session)
-            group = await fam_service.get_or_create_user_family(user)
-            invite_link = fam_service.build_invite_link(group.invite_code)
-
-            text = (
-                "👨‍👩‍👧‍👦 <b>Семейная сводка пока недоступна</b>\n\n"
-                "У вас ещё не подключен партнер. Объедините бюджет со второй половинкой, чтобы видеть "
-                "общие расходы, доходы и семейную подушку безопасности в реальном времени.\n\n"
-                f"🔗 <b>Ссылка для подключения партнера:</b>\n<code>{invite_link}</code>\n\n"
-                "<i>Отправьте эту ссылку партнеру в Telegram. После того как партнер перейдет по ней, "
-                "ваш семейный бюджет синхронизируется.</i>"
-            )
+            text = "👨‍👩‍👧‍👦 <b>Вы не состоите в семейной группе</b>"
             kb = summary_no_family_keyboard()
-            try:
-                await callback.message.edit_text(text, reply_markup=kb)
-            except Exception as exc:
-                logger.debug("Could not edit message for family invite: %s", exc)
-            await callback.answer()
+            if callback.message:
+                try:
+                    await callback.message.edit_text(text, reply_markup=kb)
+                except Exception as exc:
+                    logger.debug("Could not edit message for family guard: %s", exc)
+            await callback.answer(text="Вы не состоите в семейной группе", show_alert=True)
             return
 
         summary = await report_service.get_agent_analytics(
@@ -209,7 +198,7 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
             period="month"
         )
         advice = await ai_service.generate_financial_advice(summary)
-        text = format_summary_card(summary, advice)
+        text = format_summary_card(summary, advice, period_label="на текущую дату")
         kb = summary_card_inline_keyboard(active_scope="f")
 
         try:
@@ -230,7 +219,7 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
         period="month"
     )
     advice = await ai_service.generate_financial_advice(summary)
-    text = format_summary_card(summary, advice)
+    text = format_summary_card(summary, advice, period_label="на текущую дату")
     kb = summary_card_inline_keyboard(active_scope="p")
 
     try:

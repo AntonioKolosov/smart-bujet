@@ -266,7 +266,8 @@ class BotMessages:
 
 def format_summary_card(
     summary: Any,
-    advice: dict[str, str] | None = None
+    advice: dict[str, str] | None = None,
+    period_label: str | None = None,
 ) -> str:
     curr = getattr(summary, "currency", "KZT")
     scope_title = "👨‍👩‍👧‍👦 Семейная" if getattr(summary, "is_family", False) else "👤 Личная"
@@ -274,9 +275,11 @@ def format_summary_card(
     sign = "+" if net_savings >= 0 else ""
     saving_rate = getattr(summary, "saving_rate", 0.0)
 
+    display_period = period_label if period_label is not None else getattr(summary, "period_label", "")
+
     lines = [
         f"📊 <b>Финансовая сводка ({scope_title})</b>",
-        f"📅 Период: <b>{esc(getattr(summary, 'period_label', ''))}</b>",
+        f"📅 Период: <b>{esc(display_period)}</b>",
         "━━━━━━━━━━━━━━━━━━━━━",
         f"💸 <b>Расходы:</b> {format_amount(getattr(summary, 'total_expense', 0.0), curr)}",
         f"💰 <b>Доходы:</b> {format_amount(getattr(summary, 'total_income', 0.0), curr)}",
