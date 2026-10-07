@@ -360,9 +360,21 @@ body {
   gap: 4px;
 }
 
+.asset-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .asset-title {
   font-weight: 600;
   font-size: 1rem;
+}
+
+.asset-card-edit-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
 }
 
 .asset-meta {

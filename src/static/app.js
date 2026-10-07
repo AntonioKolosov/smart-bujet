@@ -221,6 +221,24 @@
   const saveEditTxBtn = document.getElementById('saveEditTxBtn');
   const deleteEditTxBtn = document.getElementById('deleteEditTxBtn');
 
+  // DOM Elements - Edit Asset Modal
+  const editAssetModal = document.getElementById('editAssetModal');
+  const closeEditAssetModalBtn = document.getElementById('closeEditAssetModalBtn');
+  const cancelEditAssetBtn = document.getElementById('cancelEditAssetBtn');
+  const editAssetForm = document.getElementById('editAssetForm');
+  const editAssetModalError = document.getElementById('editAssetModalError');
+  const editAssetIdInput = document.getElementById('editAssetId');
+  const editAssetNameInput = document.getElementById('editAssetNameInput');
+  const editAssetTypeSelect = document.getElementById('editAssetTypeSelect');
+  const editAssetCurrencySelect = document.getElementById('editAssetCurrencySelect');
+  const editAssetBalanceInput = document.getElementById('editAssetBalanceInput');
+  const editAssetRateInput = document.getElementById('editAssetRateInput');
+  const editAssetTitleDisplay = document.getElementById('editAssetTitleDisplay');
+  const editAssetCurrencyDisplay = document.getElementById('editAssetCurrencyDisplay');
+  const editAssetTypeBadge = document.getElementById('editAssetTypeBadge');
+  const saveEditAssetBtn = document.getElementById('saveEditAssetBtn');
+  const deleteEditAssetBtn = document.getElementById('deleteEditAssetBtn');
+
   // Category Picker Sheet Elements
   const categoryPickerTrigger = document.getElementById('categoryPickerTrigger');
   const selectedCategoryDot = document.getElementById('selectedCategoryDot');
@@ -584,9 +602,29 @@
       const main = document.createElement('div');
       main.className = 'asset-main';
 
+      const titleRow = document.createElement('div');
+      titleRow.className = 'asset-title-row';
+
       const title = document.createElement('div');
       title.className = 'asset-title';
       title.textContent = acc.name;
+      titleRow.appendChild(title);
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'tx-edit-btn asset-card-edit-btn';
+      editBtn.title = 'Редактировать счёт';
+      editBtn.setAttribute('aria-label', 'Редактировать счёт');
+      editBtn.innerHTML = `
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+        </svg>
+      `;
+      editBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openEditAssetModal(acc);
+      });
+      titleRow.appendChild(editBtn);
 
       const meta = document.createElement('div');
       meta.className = 'asset-meta';
@@ -603,7 +641,7 @@
         meta.appendChild(rateBadge);
       }
 
-      main.appendChild(title);
+      main.appendChild(titleRow);
       main.appendChild(meta);
 
       const side = document.createElement('div');
@@ -1336,6 +1374,183 @@
         } finally {
           deleteEditTxBtn.disabled = false;
           deleteEditTxBtn.innerHTML = originalHtml;
+        }
+      };
+
+      if (tg?.showConfirm) {
+        tg.showConfirm(confirmPrompt, (confirmed) => {
+          if (confirmed) {
+            if (tg?.HapticFeedback?.impactOccurred) {
+              tg.HapticFeedback.impactOccurred('medium');
+            }
+            proceedDelete();
+          }
+        });
+      } else if (window.confirm(confirmPrompt)) {
+        proceedDelete();
+      }
+    });
+  }
+
+  // --- Edit Asset Modal Logic ---
+  let currentEditingAsset = null;
+
+  function openEditAssetModal(acc) {
+    if (!editAssetModal) return;
+    currentEditingAsset = acc;
+    if (editAssetModalError) {
+      editAssetModalError.classList.add('hidden');
+      editAssetModalError.textContent = '';
+    }
+
+    if (editAssetIdInput) editAssetIdInput.value = acc.id;
+    if (editAssetNameInput) editAssetNameInput.value = acc.name || '';
+    if (editAssetTypeSelect) editAssetTypeSelect.value = acc.type || 'deposit';
+    if (editAssetCurrencySelect) editAssetCurrencySelect.value = acc.currency || 'KZT';
+    if (editAssetBalanceInput) editAssetBalanceInput.value = acc.balance !== undefined ? acc.balance : '';
+    if (editAssetRateInput) editAssetRateInput.value = acc.interest_rate !== null && acc.interest_rate !== undefined ? acc.interest_rate : '';
+
+    if (editAssetTitleDisplay) editAssetTitleDisplay.textContent = acc.name || 'Счёт';
+    if (editAssetCurrencyDisplay) editAssetCurrencyDisplay.textContent = acc.currency || 'KZT';
+    if (editAssetTypeBadge) {
+      editAssetTypeBadge.textContent = ASSET_TYPE_LABELS[acc.type] || acc.type || 'Депозит';
+    }
+
+    editAssetModal.classList.remove('hidden');
+    setTimeout(() => editAssetNameInput?.focus(), 80);
+  }
+
+  function closeEditAssetModal() {
+    if (!editAssetModal) return;
+    editAssetModal.classList.add('hidden');
+    editAssetForm?.reset();
+    currentEditingAsset = null;
+  }
+
+  if (closeEditAssetModalBtn) closeEditAssetModalBtn.addEventListener('click', closeEditAssetModal);
+  if (cancelEditAssetBtn) cancelEditAssetBtn.addEventListener('click', closeEditAssetModal);
+  if (editAssetModal) {
+    editAssetModal.addEventListener('click', (e) => {
+      if (e.target === editAssetModal) closeEditAssetModal();
+    });
+  }
+
+  // Handle Edit Asset Form Submit
+  if (editAssetForm) {
+    editAssetForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const assetId = editAssetIdInput?.value;
+      if (!assetId) return;
+
+      const name = editAssetNameInput?.value?.trim();
+      if (!name) {
+        if (editAssetModalError) {
+          editAssetModalError.textContent = 'Укажите название счёта';
+          editAssetModalError.classList.remove('hidden');
+        }
+        return;
+      }
+
+      const type = editAssetTypeSelect?.value;
+      const currency = editAssetCurrencySelect?.value;
+      const balanceVal = editAssetBalanceInput?.value !== '' ? parseFloat(editAssetBalanceInput.value) : undefined;
+      const rateVal = editAssetRateInput?.value !== '' ? parseFloat(editAssetRateInput.value) : null;
+
+      const payload = {
+        name,
+        type,
+        currency,
+        balance: balanceVal,
+        interest_rate: rateVal
+      };
+
+      if (saveEditAssetBtn) saveEditAssetBtn.disabled = true;
+      const originalSaveHtml = saveEditAssetBtn ? saveEditAssetBtn.innerHTML : 'Сохранить';
+      if (saveEditAssetBtn) saveEditAssetBtn.innerHTML = '<span>Сохранение...</span>';
+      if (editAssetModalError) editAssetModalError.classList.add('hidden');
+
+      try {
+        const res = await fetch(`/api/v1/assets/${assetId}`, {
+          method: 'PATCH',
+          headers: getHeaders(),
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || `Ошибка обновления (${res.status})`);
+        }
+
+        if (tg?.HapticFeedback?.notificationOccurred) {
+          tg.HapticFeedback.notificationOccurred('success');
+        }
+
+        closeEditAssetModal();
+        await Promise.all([fetchAssets(), fetchProfile()]);
+      } catch (err) {
+        if (editAssetModalError) {
+          editAssetModalError.textContent = err.message || 'Не удалось обновить счёт';
+          editAssetModalError.classList.remove('hidden');
+        }
+        if (tg?.HapticFeedback?.notificationOccurred) {
+          tg.HapticFeedback.notificationOccurred('error');
+        }
+      } finally {
+        if (saveEditAssetBtn) {
+          saveEditAssetBtn.disabled = false;
+          saveEditAssetBtn.innerHTML = originalSaveHtml;
+        }
+      }
+    });
+  }
+
+  // Handle Delete Asset
+  if (deleteEditAssetBtn) {
+    deleteEditAssetBtn.addEventListener('click', async () => {
+      const assetId = editAssetIdInput?.value;
+      if (!assetId) return;
+
+      const assetName = editAssetNameInput?.value || 'этот счёт';
+      const bal = currentEditingAsset?.balance || 0;
+      let confirmPrompt = `Вы уверены, что хотите удалить «${assetName}»?`;
+      if (bal > 0) {
+        confirmPrompt = `На счёте числится остаток ${formatMoney(bal, currentEditingAsset?.currency)}. Вы уверены, что хотите удалить «${assetName}»? Это действие необратимо.`;
+      }
+
+      const proceedDelete = async () => {
+        deleteEditAssetBtn.disabled = true;
+        const originalHtml = deleteEditAssetBtn.innerHTML;
+        deleteEditAssetBtn.innerHTML = '<span>Удаление...</span>';
+        if (editAssetModalError) editAssetModalError.classList.add('hidden');
+
+        try {
+          const res = await fetch(`/api/v1/assets/${assetId}`, {
+            method: 'DELETE',
+            headers: getHeaders()
+          });
+
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || `Ошибка удаления (${res.status})`);
+          }
+
+          if (tg?.HapticFeedback?.notificationOccurred) {
+            tg.HapticFeedback.notificationOccurred('success');
+          }
+
+          closeEditAssetModal();
+          await Promise.all([fetchAssets(), fetchProfile()]);
+        } catch (err) {
+          if (editAssetModalError) {
+            editAssetModalError.textContent = err.message || 'Не удалось удалить счёт';
+            editAssetModalError.classList.remove('hidden');
+          }
+          if (tg?.HapticFeedback?.notificationOccurred) {
+            tg.HapticFeedback.notificationOccurred('error');
+          }
+        } finally {
+          deleteEditAssetBtn.disabled = false;
+          deleteEditAssetBtn.innerHTML = originalHtml;
         }
       };
 

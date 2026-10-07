@@ -26,6 +26,16 @@ class AssetActionRequest(BaseModel):
     note: Optional[str] = None
 
 
+class UpdateAssetRequest(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    type: Optional[AssetType] = None
+    currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
+    balance: Optional[float] = Field(default=None, ge=0.0)
+    interest_rate: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    is_capitalized: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
 @router.get("/")
 async def list_assets(
     current_user: User = Depends(get_current_user),
@@ -170,3 +180,53 @@ async def trigger_interest_accrual(
             for t in txs
         ]
     }
+
+
+@router.patch("/{asset_id}")
+async def update_asset(
+    asset_id: uuid.UUID,
+    payload: UpdateAssetRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    service = AssetService(session)
+    asset = await service.update_asset(
+        user_id=current_user.id,
+        asset_id=asset_id,
+        name=payload.name,
+        asset_type=payload.type,
+        currency=payload.currency,
+        balance=payload.balance,
+        interest_rate=payload.interest_rate,
+        is_capitalized=payload.is_capitalized,
+        is_active=payload.is_active
+    )
+    if not asset:
+        raise HTTPException(status_code=404, detail="Счёт не найден")
+
+    return {
+        "status": "ok",
+        "asset": {
+            "id": str(asset.id),
+            "name": asset.name,
+            "type": asset.type.value if hasattr(asset.type, "value") else str(asset.type),
+            "currency": asset.currency,
+            "balance": float(asset.balance),
+            "interest_rate": float(asset.interest_rate) if asset.interest_rate else None,
+            "is_capitalized": getattr(asset, "is_capitalized", True),
+            "is_active": asset.is_active
+        }
+    }
+
+
+@router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_asset(
+    asset_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    service = AssetService(session)
+    success = await service.delete_asset(user_id=current_user.id, asset_id=asset_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Счёт не найден")
+    return None

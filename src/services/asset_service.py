@@ -4,7 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user import User
@@ -406,3 +406,79 @@ class AssetService:
             if tx:
                 created_txs.append(tx)
         return created_txs
+
+    async def get_asset_by_id(self, asset_id: uuid.UUID, user_id: int) -> AssetAccount | None:
+        """Fetch asset account ensuring ownership by user_id."""
+        query = select(AssetAccount).where(
+            AssetAccount.id == asset_id,
+            AssetAccount.user_id == user_id
+        )
+        return await self.session.scalar(query)
+
+    async def update_asset(
+        self,
+        user_id: int,
+        asset_id: uuid.UUID,
+        name: str | None = None,
+        asset_type: AssetType | None = None,
+        currency: str | None = None,
+        balance: float | None = None,
+        interest_rate: float | None = None,
+        is_capitalized: bool | None = None,
+        is_active: bool | None = None
+    ) -> AssetAccount | None:
+        asset = await self.get_asset_by_id(asset_id, user_id)
+        if not asset:
+            return None
+
+        if name is not None:
+            cleaned = name.strip()
+            if cleaned:
+                asset.name = cleaned
+        if asset_type is not None:
+            asset.type = asset_type
+        if currency is not None:
+            cleaned_curr = currency.strip().upper()
+            if cleaned_curr:
+                asset.currency = cleaned_curr
+        if balance is not None and balance >= 0:
+            asset.balance = float(balance)
+        if interest_rate is not None:
+            asset.interest_rate = float(interest_rate) if interest_rate > 0 else None
+        if is_capitalized is not None:
+            asset.is_capitalized = is_capitalized
+        if is_active is not None:
+            asset.is_active = is_active
+
+        await self.session.commit()
+        await self.session.refresh(asset)
+        return asset
+
+    async def delete_asset(
+        self,
+        user_id: int,
+        asset_id: uuid.UUID
+    ) -> bool:
+        asset = await self.get_asset_by_id(asset_id, user_id)
+        if not asset:
+            return False
+
+        # 1. Delete accrued interest transactions to prevent phantom liquid income injection
+        await self.session.execute(
+            delete(Transaction).where(
+                Transaction.asset_account_id == asset_id,
+                Transaction.type == CategoryType.income
+            )
+        )
+
+        # 2. Detach transfers to/from this asset to preserve cashflow ledger history
+        await self.session.execute(
+            update(Transaction).where(
+                Transaction.asset_account_id == asset_id
+            ).values(asset_account_id=None)
+        )
+
+        # 3. Delete asset record
+        await self.session.delete(asset)
+        await self.session.commit()
+        return True

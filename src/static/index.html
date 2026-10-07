@@ -489,6 +489,82 @@
     </div>
   </div>
 
+  <!-- Modal: Edit Asset / Deposit -->
+  <div id="editAssetModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Редактировать счёт</h3>
+        <button id="closeEditAssetModalBtn" class="close-btn" aria-label="Закрыть">&times;</button>
+      </div>
+      <form id="editAssetForm" class="modal-form">
+        <div id="editAssetModalError" class="error-banner hidden" style="margin-bottom: 0;"></div>
+        <input type="hidden" id="editAssetId" />
+
+        <div class="edit-tx-card-preview">
+          <div class="edit-tx-info">
+            <span class="edit-tx-title" id="editAssetTitleDisplay">Счёт</span>
+            <span class="edit-tx-date" id="editAssetCurrencyDisplay">KZT</span>
+          </div>
+          <span class="edit-tx-type-badge" id="editAssetTypeBadge">Депозит</span>
+        </div>
+
+        <label class="form-label">
+          <span class="form-label-title">Название</span>
+          <input type="text" id="editAssetNameInput" class="form-input" placeholder="Например: Kaspi Депозит" required />
+        </label>
+
+        <div class="form-row">
+          <label class="form-label">
+            <span class="form-label-title">Тип</span>
+            <select id="editAssetTypeSelect" class="form-select">
+              <option value="deposit">Депозит / Вклад</option>
+              <option value="currency">Наличная валюта</option>
+              <option value="savings">Копилка</option>
+              <option value="investment">Инвестиции</option>
+            </select>
+          </label>
+          <label class="form-label">
+            <span class="form-label-title">Валюта</span>
+            <select id="editAssetCurrencySelect" class="form-select">
+              <option value="KZT">₸ KZT</option>
+              <option value="USD">$ USD</option>
+              <option value="EUR">€ EUR</option>
+              <option value="RUB">₽ RUB</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label">
+            <span class="form-label-title">Остаток</span>
+            <input type="number" step="0.01" min="0" id="editAssetBalanceInput" class="form-input" placeholder="0" inputmode="decimal" />
+          </label>
+          <label class="form-label">
+            <span class="form-label-title">Ставка (% год.)</span>
+            <input type="number" step="0.1" min="0" max="100" id="editAssetRateInput" class="form-input" placeholder="например 14.5" inputmode="decimal" />
+          </label>
+        </div>
+
+        <div class="modal-actions-row">
+          <button type="button" id="cancelEditAssetBtn" class="secondary-btn-modal">Отмена</button>
+          <button type="submit" id="saveEditAssetBtn" class="modal-submit-btn">Сохранить</button>
+        </div>
+
+        <div class="modal-danger-row">
+          <button type="button" id="deleteEditAssetBtn" class="danger-btn-modal">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              <line x1="10" y1="11" x2="10" y2="17"></line>
+              <line x1="14" y1="11" x2="14" y2="17"></line>
+            </svg>
+            Удалить счёт
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Category Picker Bottom Sheet (Шторка выбора категорий) -->
   <div id="categorySheetOverlay" class="sheet-overlay hidden">
     <div id="categorySheetContainer" class="sheet-container">

@@ -31,6 +31,7 @@ class AssetAccount(Base, TimestampMixin):
     currency: Mapped[str] = mapped_column(String(3), default="KZT")
     balance: Mapped[float] = mapped_column(Numeric(14, 2), default=0.0)
     interest_rate: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    is_capitalized: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     user: Mapped["User"] = relationship("User", backref="asset_accounts")
