@@ -31,7 +31,10 @@ async def list_transactions(
 
     query = (
         select(Transaction)
-        .options(joinedload(Transaction.category))
+        .options(
+            joinedload(Transaction.category),
+            joinedload(Transaction.asset_account),
+        )
         .where(*conditions)
         .order_by(desc(Transaction.transaction_date))
         .offset(offset)

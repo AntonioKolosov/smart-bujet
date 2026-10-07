@@ -248,7 +248,8 @@ class TransactionService:
             else None
         ) or (user.currency if user else "KZT")
 
-        target_type = AssetType.deposit
+        is_foreign = (target_currency != (user.currency if user else "KZT"))
+        target_type = AssetType.currency if is_foreign else AssetType.deposit
 
         target_asset_name = item.get("target_asset_name")
         if target_asset_name and any(b in target_asset_name.lower() for b in ["покупка", "валюты", "none", "null"]):
@@ -265,8 +266,8 @@ class TransactionService:
         )
         if not asset_acc:
             safe_name = target_asset_name
-            if not safe_name and target_currency != (user.currency if user else "KZT"):
-                safe_name = f"Депозит {target_currency}"
+            if not safe_name and is_foreign:
+                safe_name = "Наличная валюта"
             asset_acc = await self.asset_service.get_or_create_default_asset(
                 user_id=user_id,
                 asset_type=target_type,
@@ -447,8 +448,11 @@ class TransactionService:
                     asset_amt=asset_amt,
                     context_text=text
                 )
-                action_prefix = "Пополнение" if cat_type == CategoryType.transfer_out else "Снятие"
-                normalized_name = f"{action_prefix}: {asset_acc_name}"
+                if asset_amt:
+                    normalized_name = "Покупка валюты" if cat_type == CategoryType.transfer_out else "Продажа валюты"
+                else:
+                    action_prefix = "Пополнение" if cat_type == CategoryType.transfer_out else "Снятие"
+                    normalized_name = f"{action_prefix}: {asset_acc_name}"
 
             tx = Transaction(
                 user_id=user_id,
@@ -635,8 +639,11 @@ class TransactionService:
                     asset_amt=asset_amt,
                     context_text=last_raw_text
                 )
-                action_prefix = "Пополнение" if cat_type == CategoryType.transfer_out else "Снятие"
-                normalized_name = f"{action_prefix}: {asset_acc_name}"
+                if asset_amt:
+                    normalized_name = "Покупка валюты" if cat_type == CategoryType.transfer_out else "Продажа валюты"
+                else:
+                    action_prefix = "Пополнение" if cat_type == CategoryType.transfer_out else "Снятие"
+                    normalized_name = f"{action_prefix}: {asset_acc_name}"
 
             tx = Transaction(
                 user_id=user_id,
@@ -1221,6 +1228,18 @@ class TransactionService:
         item_name = tx.item_name or cat_name or "Операция"
         raw_text = tx.raw_text if is_owner else None
 
+        def to_decimal(val: Any) -> Decimal | None:
+            if val is None:
+                return None
+            try:
+                return Decimal(str(val))
+            except Exception:
+                return None
+
+        asset_amt_dec = to_decimal(getattr(tx, "asset_amount", None))
+        ex_rate_dec = to_decimal(getattr(tx, "exchange_rate", None))
+        has_asset_amt = asset_amt_dec is not None
+
         if not is_owner:
             is_deposit_op = (
                 tx.asset_account_id is not None
@@ -1228,15 +1247,21 @@ class TransactionService:
                 or any(k in item_name.lower() for k in ["депозит", "вклад", "копилк", "накоплен", "процент"])
             )
             if is_deposit_op:
+                raw_text = None
                 if "процент" in item_name.lower() or (cat_name and "процент" in cat_name.lower()):
                     item_name = "Проценты по вкладу"
                     cat_name = "Проценты по вкладу"
+                elif has_asset_amt:
+                    item_name = "Покупка валюты" if tx.type == CategoryType.transfer_out else "Продажа валюты"
+                    cat_name = "Денежный перевод"
                 elif tx.type in (CategoryType.transfer_out, CategoryType.expense):
                     item_name = "Пополнение депозита"
                     cat_name = "Депозит и вклады"
                 else:
                     item_name = "Снятие с депозита"
                     cat_name = "Снятие с депозита"
+
+        asset_curr = (tx.asset_account.currency if getattr(tx, "asset_account", None) else "USD") if has_asset_amt else None
 
         return {
             "id": tx.id,
@@ -1248,6 +1273,10 @@ class TransactionService:
             "original_amount": Decimal(str(tx.original_amount)) if tx.original_amount is not None else None,
             "discount_amount": Decimal(str(tx.discount_amount)) if tx.discount_amount is not None else None,
             "type": tx.type.value if hasattr(tx.type, "value") else str(tx.type),
+            "asset_account_id": tx.asset_account_id if is_owner else None,
+            "asset_amount": asset_amt_dec,
+            "exchange_rate": ex_rate_dec,
+            "asset_currency": asset_curr,
             "item_name": item_name,
             "raw_text": raw_text,
             "source": tx.source.value if hasattr(tx.source, "value") else str(tx.source),

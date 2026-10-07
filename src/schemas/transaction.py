@@ -44,6 +44,10 @@ class TransactionRead(BaseModel):
     original_amount: Decimal | None = None
     discount_amount: Decimal | None = None
     type: str
+    asset_account_id: UUID | None = None
+    asset_amount: Decimal | None = None
+    exchange_rate: Decimal | None = None
+    asset_currency: str | None = None
     item_name: str | None = None
     raw_text: str | None = None
     source: str

@@ -168,7 +168,7 @@ class TestCurrencyExchangeAndTransfers(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tx.asset_amount, 100.0)
         self.assertEqual(tx.exchange_rate, 450.0)
         self.assertEqual(tx.type, CategoryType.transfer_out)
-        self.assertEqual(tx.item_name, "Пополнение: Депозит USD")
+        self.assertEqual(tx.item_name, "Покупка валюты")
         self.assertEqual(tx.asset_account.name, "Депозит USD")
 
     async def test_family_joint_feed_exposes_asset_amount_and_currency(self):

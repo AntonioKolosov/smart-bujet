@@ -77,7 +77,7 @@
 
   const ASSET_TYPE_LABELS = {
     deposit: 'Вклад',
-    currency: 'Валюта',
+    currency: 'Наличная валюта',
     savings: 'Копилка',
     investment: 'Инвестиции'
   };
@@ -481,7 +481,10 @@
         let prefix = '-';
         let amountClass = 'expense';
 
-        if (tx.type === 'income') {
+        if (tx.asset_amount && tx.type === 'transfer_out') {
+          prefix = '-';
+          amountClass = 'expense';
+        } else if (tx.type === 'income') {
           prefix = '+';
           amountClass = 'income';
         } else if (tx.type === 'transfer_out') {
@@ -640,6 +643,9 @@
         rateBadge.textContent = `${acc.interest_rate}% год.`;
         meta.appendChild(rateBadge);
       }
+
+      main.style.cursor = 'pointer';
+      main.addEventListener('click', () => openEditAssetModal(acc));
 
       main.appendChild(titleRow);
       main.appendChild(meta);
@@ -1675,7 +1681,10 @@
 
       let prefix = '-';
       let amountClass = 'expense';
-      if (isInc) {
+      if (tx.asset_amount && isTransferOut) {
+        prefix = '-';
+        amountClass = 'expense';
+      } else if (isInc) {
         prefix = '+';
         amountClass = 'income';
       } else if (isTransferOut) {
