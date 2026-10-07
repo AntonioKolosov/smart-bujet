@@ -109,6 +109,7 @@
   const btnAnalyticsFamily = document.getElementById('btnAnalyticsFamily');
   const analyticsLoaderEl = document.getElementById('analyticsLoader');
   const analyticsErrorEl = document.getElementById('analyticsError');
+  const analyticsNoFamilyEl = document.getElementById('analyticsNoFamily');
   const analyticsContentEl = document.getElementById('analyticsContent');
   const analyticsMonthSpendEl = document.getElementById('analyticsMonthSpend');
   const analyticsAvgSpendEl = document.getElementById('analyticsAvgSpend');
@@ -1571,6 +1572,7 @@
     if (!tabAnalytics) return;
     analyticsLoaderEl?.classList.remove('hidden');
     analyticsErrorEl?.classList.add('hidden');
+    analyticsNoFamilyEl?.classList.add('hidden');
     analyticsContentEl?.classList.add('hidden');
 
     try {
@@ -1581,7 +1583,13 @@
       ]);
 
       if (!catRes.ok || !monthRes.ok) {
-        throw new Error('Не удалось загрузить данные аналитики');
+        const errPayload = await (catRes.ok ? monthRes : catRes).json().catch(() => ({}));
+        const errorMsg = errPayload.detail || 'Не удалось загрузить данные аналитики';
+        if (isFamily && (errorMsg.includes('не состоите в семейной группе') || catRes.status === 400 || monthRes.status === 400)) {
+          analyticsNoFamilyEl?.classList.remove('hidden');
+          return;
+        }
+        throw new Error(errorMsg);
       }
 
       const catData = await catRes.json();

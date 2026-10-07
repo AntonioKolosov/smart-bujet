@@ -577,8 +577,8 @@ class TestFamilyServiceCoverage(unittest.IsolatedAsyncioTestCase):
         solo_group = FamilyGroup(id=new_user.family_group_id, name="Семья Чарли", owner_id=3)
 
         self.session.scalar = AsyncMock(side_effect=[
+            None,        # No partner in Charlie's old group (passes top-level partner guard)
             self.group,  # Found target family
-            None,        # No other members in Charlie's old group
             1            # Partner ID to notify in target family
         ])
         self.session.get.return_value = solo_group

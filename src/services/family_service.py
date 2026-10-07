@@ -241,6 +241,16 @@ class FamilyService:
         Joins an existing group by deep-link invite code.
         Returns: (group, partner_id_to_notify, message)
         """
+        # 1. Top-Level Active Partner Guard
+        if user.family_group_id:
+            partner_query = select(User.id).where(
+                User.family_group_id == user.family_group_id,
+                User.id != user.id
+            )
+            existing_partner = await self.session.scalar(partner_query)
+            if existing_partner:
+                return None, None, "Вы уже состоите в семейной группе."
+
         code = invite_code.strip()
         query = select(FamilyGroup).where(FamilyGroup.invite_code == code)
         group = await self.session.scalar(query)
@@ -254,12 +264,6 @@ class FamilyService:
         old_group = None
         if user.family_group_id:
             old_group = await self.session.get(FamilyGroup, user.family_group_id)
-            if old_group:
-                other_members = await self.session.scalar(
-                    select(User.id).where(User.family_group_id == old_group.id, User.id != user.id)
-                )
-                if other_members:
-                    return None, None, f"Вы уже состоите в группе «{old_group.name}». Сначала покиньте её."
 
         user.family_group_id = group.id
         await self.session.flush()

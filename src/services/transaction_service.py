@@ -324,6 +324,7 @@ class TransactionService:
                     "id": str(c.id),
                     "name": c.name,
                     "remaining_amount": float(c.remaining_amount),
+                    "monthly_payment": float(c.monthly_payment) if c.monthly_payment is not None else None,
                     "currency": c.currency,
                 }
                 for c in user_credits
@@ -363,6 +364,23 @@ class TransactionService:
                 amt = Decimal(str(item.get("amount", 0) or 0))
             except Exception:
                 amt = Decimal("0")
+
+            # Service-level fallback: Credit Monthly Payment Auto-Fill
+            credit_action = item.get("credit_action")
+            is_repay = (credit_action == "repay" or item.get("category") == "Погашение кредита")
+            if amt <= Decimal("0") and is_repay:
+                target_name = item.get("target_credit_name") or item.get("item_name")
+                hint_id = item.get("credit_account_id")
+                resolved_c = await self.credit_service.resolve_credit_account(
+                    user_id=user_id,
+                    target_name=target_name,
+                    credit_id_hint=hint_id
+                )
+                if resolved_c and resolved_c.monthly_payment and resolved_c.monthly_payment > 0:
+                    amt = Decimal(str(resolved_c.monthly_payment))
+                    item["amount"] = float(amt)
+                    item["target_credit_name"] = resolved_c.name
+                    item["credit_account_id"] = str(resolved_c.id)
 
             if amt <= Decimal("0"):
                 continue
@@ -493,6 +511,7 @@ class TransactionService:
                 "id": str(c.id),
                 "name": c.name,
                 "remaining_amount": float(c.remaining_amount),
+                "monthly_payment": float(c.monthly_payment) if c.monthly_payment is not None else None,
                 "currency": c.currency,
             }
             for c in user_credits
@@ -531,6 +550,23 @@ class TransactionService:
                 amt = Decimal(str(item.get("amount", 0) or 0))
             except Exception:
                 amt = Decimal("0")
+
+            # Service-level fallback: Credit Monthly Payment Auto-Fill
+            credit_action = item.get("credit_action")
+            is_repay = (credit_action == "repay" or item.get("category") == "Погашение кредита")
+            if amt <= Decimal("0") and is_repay:
+                target_name = item.get("target_credit_name") or item.get("item_name")
+                hint_id = item.get("credit_account_id")
+                resolved_c = await self.credit_service.resolve_credit_account(
+                    user_id=user_id,
+                    target_name=target_name,
+                    credit_id_hint=hint_id
+                )
+                if resolved_c and resolved_c.monthly_payment and resolved_c.monthly_payment > 0:
+                    amt = Decimal(str(resolved_c.monthly_payment))
+                    item["amount"] = float(amt)
+                    item["target_credit_name"] = resolved_c.name
+                    item["credit_account_id"] = str(resolved_c.id)
 
             if amt <= Decimal("0"):
                 continue

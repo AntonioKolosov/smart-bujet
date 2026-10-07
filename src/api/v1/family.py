@@ -46,7 +46,8 @@ async def join_family_group(
     service = FamilyService(session)
     group, partner_id, msg = await service.join_by_invite(current_user, data.invite_code)
     if not group:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg)
+        status_code = status.HTTP_400_BAD_REQUEST if "уже состоите" in msg else status.HTTP_404_NOT_FOUND
+        raise HTTPException(status_code=status_code, detail=msg)
 
     if partner_id:
         try:

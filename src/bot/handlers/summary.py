@@ -25,39 +25,43 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-def summary_scope_selection_keyboard() -> InlineKeyboardMarkup:
+async def user_has_active_family(session: AsyncSession, user: User) -> bool:
+    """Check if user belongs to an active family group with at least 2 members."""
+    if not user.family_group_id:
+        return False
+    count = await session.scalar(
+        select(func.count(User.id)).where(User.family_group_id == user.family_group_id)
+    )
+    return (count or 0) >= 2
+
+
+def summary_scope_selection_keyboard(has_family: bool = False) -> InlineKeyboardMarkup:
     """Inline keyboard asking user to choose personal or family summary, or go back to main menu."""
+    row1 = [InlineKeyboardButton(text="👤 Личная", callback_data="sum:scope:p")]
+    if has_family:
+        row1.append(InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семейная", callback_data="sum:scope:f"))
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="👤 Личная", callback_data="sum:scope:p"),
-                InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семейная", callback_data="sum:scope:f"),
-            ],
-            [
-                InlineKeyboardButton(text="🔙 Назад", callback_data="sum:back:main"),
-            ]
+            row1,
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="sum:back:main")]
         ]
     )
 
 
-def summary_card_inline_keyboard(active_scope: str) -> InlineKeyboardMarkup:
+def summary_card_inline_keyboard(active_scope: str, has_family: bool = False) -> InlineKeyboardMarkup:
     """
     Compact inline keyboard for current moment summary card.
-    Eliminates refresh button. Provides one-tap toggle between personal and family views,
-    and direct button to return to the main menu.
+    Provides one-tap toggle between personal and family views only if family is active.
     """
+    keyboard_rows = []
     if active_scope == "p":
-        row1 = [
-            InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семейная", callback_data="sum:scope:f"),
-        ]
+        if has_family:
+            keyboard_rows.append([InlineKeyboardButton(text="👨‍👩‍👧‍👦 Семейная", callback_data="sum:scope:f")])
     else:
-        row1 = [
-            InlineKeyboardButton(text="👤 Личная", callback_data="sum:scope:p"),
-        ]
-    row2 = [
-        InlineKeyboardButton(text="📋 В меню", callback_data="sum:back:main"),
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=[row1, row2])
+        keyboard_rows.append([InlineKeyboardButton(text="👤 Личная", callback_data="sum:scope:p")])
+
+    keyboard_rows.append([InlineKeyboardButton(text="📋 В меню", callback_data="sum:back:main")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
 
 def summary_no_family_keyboard() -> InlineKeyboardMarkup:
@@ -107,8 +111,9 @@ async def cmd_summary(message: Message, session: AsyncSession):
     except Exception:
         pass
 
+    has_fam = await user_has_active_family(session, user)
     text = "📊 <b>Финансовая сводка от агента</b>\n\nВыберите какую сводку сформировать:"
-    kb = summary_scope_selection_keyboard()
+    kb = summary_scope_selection_keyboard(has_family=has_fam)
     await message.answer(text, reply_markup=kb)
 
 
@@ -148,8 +153,9 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
 
     # 2. Scope Selection Prompt (from "📊 Сводка от агента" button or "🔙 Назад" from summary card)
     if data in ("sum:menu", "sum:choose"):
+        has_fam = await user_has_active_family(session, user)
         text = "📊 <b>Финансовая сводка от агента</b>\n\nВыберите какую сводку сформировать:"
-        kb = summary_scope_selection_keyboard()
+        kb = summary_scope_selection_keyboard(has_family=has_fam)
         try:
             await callback.message.edit_text(text, reply_markup=kb)
         except Exception as exc:
@@ -220,7 +226,8 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
     )
     advice = await ai_service.generate_financial_advice(summary)
     text = format_summary_card(summary, advice, period_label="на текущую дату")
-    kb = summary_card_inline_keyboard(active_scope="p")
+    has_fam = await user_has_active_family(session, user)
+    kb = summary_card_inline_keyboard(active_scope="p", has_family=has_fam)
 
     try:
         await callback.message.edit_text(text, reply_markup=kb)
