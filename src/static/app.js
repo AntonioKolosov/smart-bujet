@@ -477,6 +477,18 @@
         finalAmount.textContent = `${prefix}${formatMoney(tx.amount)}`;
         amounts.appendChild(finalAmount);
 
+        // Display dual asset amount (currency purchase / sale) if present
+        if (tx.asset_amount) {
+          const assetCurr = tx.asset_currency || 'USD';
+          const assetSym = CURRENCY_SYMBOLS[assetCurr] || assetCurr;
+          const isDepositCredit = tx.type === 'transfer_out';
+          const dualSign = isDepositCredit ? '+' : '-';
+          const dualEl = document.createElement('div');
+          dualEl.className = `tx-dual-badge ${isDepositCredit ? 'income' : 'expense'}`;
+          dualEl.textContent = `${dualSign}${tx.asset_amount}\u00A0${assetSym}`;
+          amounts.appendChild(dualEl);
+        }
+
         // Display discount if present
         if (tx.discount_amount && Number(tx.discount_amount) > 0) {
           const discountEl = document.createElement('div');
@@ -1146,10 +1158,29 @@
       editTxCurrencyLabel.textContent = currencySymbol;
     }
 
+    const isInc = tx.type === 'income';
+    const isTransfer = tx.type === 'transfer_out' || tx.type === 'transfer_in';
     if (editTxTypeBadge) {
-      const isInc = tx.type === 'income';
-      editTxTypeBadge.textContent = isInc ? 'Доход' : 'Расход';
-      editTxTypeBadge.className = `edit-tx-type-badge ${isInc ? 'income' : 'expense'}`;
+      if (isTransfer) {
+        editTxTypeBadge.textContent = 'Перевод';
+        editTxTypeBadge.className = 'edit-tx-type-badge transfer';
+      } else {
+        editTxTypeBadge.textContent = isInc ? 'Доход' : 'Расход';
+        editTxTypeBadge.className = `edit-tx-type-badge ${isInc ? 'income' : 'expense'}`;
+      }
+    }
+
+    if (categoryPickerTrigger) {
+      const arrowEl = categoryPickerTrigger.querySelector('.category-trigger-arrow');
+      if (isTransfer) {
+        categoryPickerTrigger.style.pointerEvents = 'none';
+        categoryPickerTrigger.style.opacity = '0.7';
+        if (arrowEl) arrowEl.style.display = 'none';
+      } else {
+        categoryPickerTrigger.style.pointerEvents = 'auto';
+        categoryPickerTrigger.style.opacity = '1';
+        if (arrowEl) arrowEl.style.display = '';
+      }
     }
 
     editTxAmount.value = parseFloat(tx.amount).toFixed(2);
@@ -1178,6 +1209,12 @@
     if (!editTxModal) return;
     editTxModal.classList.add('hidden');
     editTxForm?.reset();
+    if (categoryPickerTrigger) {
+      categoryPickerTrigger.style.pointerEvents = 'auto';
+      categoryPickerTrigger.style.opacity = '1';
+      const arrowEl = categoryPickerTrigger.querySelector('.category-trigger-arrow');
+      if (arrowEl) arrowEl.style.display = '';
+    }
     closeCategorySheet();
   }
 
@@ -1411,26 +1448,52 @@
 
     transactions.forEach(tx => {
       const el = document.createElement('div');
-      el.className = 'tx-item';
+      el.className = 'tx-card';
       const isInc = tx.type === 'income';
+      const isTransferOut = tx.type === 'transfer_out';
+      const isTransferIn = tx.type === 'transfer_in';
       const authorClass = tx.is_current_user ? 'author-self' : 'author-partner';
       const safeTitle = escapeHtml(tx.item_name || tx.category_name || 'Операция');
       const safeAuthor = escapeHtml(tx.author_name || (tx.is_current_user ? 'Вы' : 'Партнёр'));
       const safeCat = escapeHtml(tx.category_name || '');
 
+      let prefix = '-';
+      let amountClass = 'expense';
+      if (isInc) {
+        prefix = '+';
+        amountClass = 'income';
+      } else if (isTransferOut) {
+        prefix = '→ ';
+        amountClass = 'transfer';
+      } else if (isTransferIn) {
+        prefix = '← ';
+        amountClass = 'transfer';
+      }
+
+      let dualBadge = '';
+      if (tx.asset_amount) {
+        const assetCurr = tx.asset_currency || 'USD';
+        const assetSym = CURRENCY_SYMBOLS[assetCurr] || assetCurr;
+        const dualSign = isTransferOut ? '+' : '-';
+        dualBadge = `<div class="tx-dual-badge ${isTransferOut ? 'income' : 'expense'}">${dualSign}${tx.asset_amount}\u00A0${assetSym}</div>`;
+      }
+
       el.innerHTML = `
-        <div class="tx-main">
+        <div class="tx-info">
           <div class="tx-top-row">
             <span class="tx-title">${safeTitle}</span>
             <span class="author-tag ${authorClass}">${safeAuthor}</span>
           </div>
-          <div class="tx-sub-row">
-            <span class="tx-date">${formatDateGroup(tx.transaction_date)} • ${formatTime(tx.transaction_date)}</span>
-            <span class="tx-cat-chip">${safeCat}</span>
+          <div class="tx-meta">
+            <span>${formatDateGroup(tx.transaction_date)} • ${formatTime(tx.transaction_date)}</span>
+            <span class="tx-category">${safeCat}</span>
           </div>
         </div>
-        <div class="tx-amount ${isInc ? 'income' : 'expense'}">
-          ${isInc ? '+' : '-'}${formatMoney(tx.amount)}
+        <div class="tx-amounts">
+          <div class="tx-final-amount ${amountClass}">
+            ${prefix}${formatMoney(tx.amount)}
+          </div>
+          ${dualBadge}
         </div>
       `;
       familyTxListEl.appendChild(el);

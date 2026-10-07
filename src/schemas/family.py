@@ -62,6 +62,9 @@ class FamilyTransactionItem(BaseModel):
     category_name: str | None = None
     item_name: str | None = None
     raw_text: str | None = None
+    asset_amount: float | None = None
+    exchange_rate: float | None = None
+    asset_currency: str | None = None
     source: str
     transaction_date: datetime
 

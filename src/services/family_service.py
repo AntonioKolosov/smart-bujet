@@ -166,7 +166,11 @@ class FamilyService:
 
         query = (
             select(Transaction)
-            .options(joinedload(Transaction.category), joinedload(Transaction.user))
+            .options(
+                joinedload(Transaction.category),
+                joinedload(Transaction.user),
+                joinedload(Transaction.asset_account),
+            )
             .where(
                 or_(
                     Transaction.family_group_id == group.id,
@@ -198,12 +202,17 @@ class FamilyService:
                 if "процент" in item_name.lower() or (cat_name and "процент" in cat_name.lower()):
                     item_name = "Проценты по вкладу"
                     cat_name = "Проценты по вкладу"
+                elif tx.asset_amount:
+                    item_name = "Покупка валюты" if tx.type == CategoryType.transfer_out else "Продажа валюты"
+                    cat_name = "Денежный перевод"
                 elif tx.type in (CategoryType.transfer_out, CategoryType.expense):
                     item_name = "Пополнение депозита"
                     cat_name = "Депозит и вклады"
                 else:
                     item_name = "Снятие с депозита"
                     cat_name = "Снятие с депозита"
+
+            asset_curr = (tx.asset_account.currency if tx.asset_account else "USD") if tx.asset_amount else None
 
             result.append({
                 "id": tx.id,
@@ -219,6 +228,9 @@ class FamilyService:
                 "category_name": cat_name,
                 "item_name": item_name,
                 "raw_text": raw_text,
+                "asset_amount": float(tx.asset_amount) if tx.asset_amount else None,
+                "exchange_rate": float(tx.exchange_rate) if tx.exchange_rate else None,
+                "asset_currency": asset_curr,
                 "source": tx.source.value if hasattr(tx.source, "value") else str(tx.source),
                 "transaction_date": tx.transaction_date
             })

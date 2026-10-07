@@ -309,6 +309,25 @@ body {
   color: #38bdf8;
 }
 
+.tx-dual-badge {
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+.tx-dual-badge.income {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-income);
+}
+
+.tx-dual-badge.expense {
+  background: rgba(244, 63, 94, 0.15);
+  color: var(--accent-expense);
+}
+
 .tx-discount {
   display: flex;
   align-items: center;
@@ -654,6 +673,11 @@ input[type="number"] {
 .edit-tx-type-badge.income {
   background: rgba(34, 197, 94, 0.15);
   color: var(--accent-income);
+}
+
+.edit-tx-type-badge.transfer {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
 }
 
 /* ========================================================

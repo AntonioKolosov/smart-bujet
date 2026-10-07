@@ -240,7 +240,7 @@ class TransactionService:
         amt: Decimal,
         asset_amt: Any | None,
         context_text: str | None = None
-    ) -> tuple[uuid.UUID, str]:
+    ) -> tuple[uuid.UUID, str, AssetAccount]:
         raw_curr = item.get("target_currency")
         target_currency = (
             raw_curr.strip().upper()
@@ -248,17 +248,12 @@ class TransactionService:
             else None
         ) or (user.currency if user else "KZT")
 
-        raw_name_lower = (item.get("item_name") or context_text or "").lower()
-        is_deposit_keyword = any(k in raw_name_lower for k in ["депозит", "вклад", "копилк", "страховк", "сейф"])
+        target_type = AssetType.deposit
 
-        if is_deposit_keyword:
-            target_type = AssetType.deposit
-        elif target_currency != (user.currency if user else "KZT"):
-            target_type = AssetType.currency
-        else:
-            target_type = AssetType.deposit
+        target_asset_name = item.get("target_asset_name")
+        if target_asset_name and any(b in target_asset_name.lower() for b in ["покупка", "валюты", "none", "null"]):
+            target_asset_name = None
 
-        target_asset_name = item.get("target_asset_name") or item.get("item_name")
         asset_id_hint = item.get("asset_account_id")
 
         asset_acc = await self.asset_service.resolve_asset_account(
@@ -269,7 +264,9 @@ class TransactionService:
             asset_id_hint=asset_id_hint
         )
         if not asset_acc:
-            safe_name = target_asset_name if target_asset_name and "none" not in target_asset_name.lower() else None
+            safe_name = target_asset_name
+            if not safe_name and target_currency != (user.currency if user else "KZT"):
+                safe_name = f"Депозит {target_currency}"
             asset_acc = await self.asset_service.get_or_create_default_asset(
                 user_id=user_id,
                 asset_type=target_type,
@@ -283,7 +280,7 @@ class TransactionService:
         else:
             asset_acc.balance = float(Decimal(str(asset_acc.balance or 0)) - delta)
 
-        return asset_acc.id, asset_acc.name
+        return asset_acc.id, asset_acc.name, asset_acc
 
     async def process_text(self, user_id: int, text: str) -> list[Transaction]:
         """
@@ -418,8 +415,12 @@ class TransactionService:
                     status_suffix = " (Закрыт! 🎉)" if was_closed else f" (Остаток: {rem_str} {updated_credit.currency})"
                     normalized_name = f"Погашение: {credit.name}{status_suffix}"
 
+            asset_account_obj = None
             if cat_type in (CategoryType.transfer_out, CategoryType.transfer_in):
-                asset_account_id, asset_acc_name = await self._handle_asset_transfer(
+                if ex_rate and float(ex_rate) > 1 and asset_amt and abs(float(amt) - float(asset_amt)) < 1.0:
+                    amt = Decimal(str(asset_amt)) * Decimal(str(ex_rate))
+
+                asset_account_id, asset_acc_name, asset_account_obj = await self._handle_asset_transfer(
                     user_id=user_id,
                     user=user,
                     item=item,
@@ -448,6 +449,8 @@ class TransactionService:
                 source=TransactionSource.text,
             )
             tx.category = category
+            if asset_account_obj:
+                tx.asset_account = asset_account_obj
             self.session.add(tx)
             await resolver.record_alias(normalized_name, category)
             transactions.append(tx)
@@ -582,8 +585,12 @@ class TransactionService:
                     status_suffix = " (Закрыт! 🎉)" if was_closed else f" (Остаток: {rem_str} {updated_credit.currency})"
                     normalized_name = f"Погашение: {credit.name}{status_suffix}"
 
+            asset_account_obj = None
             if cat_type in (CategoryType.transfer_out, CategoryType.transfer_in):
-                asset_account_id, asset_acc_name = await self._handle_asset_transfer(
+                if ex_rate and float(ex_rate) > 1 and asset_amt and abs(float(amt) - float(asset_amt)) < 1.0:
+                    amt = Decimal(str(asset_amt)) * Decimal(str(ex_rate))
+
+                asset_account_id, asset_acc_name, asset_account_obj = await self._handle_asset_transfer(
                     user_id=user_id,
                     user=user,
                     item=item,
@@ -612,6 +619,8 @@ class TransactionService:
                 source=TransactionSource.voice,
             )
             tx.category = category
+            if asset_account_obj:
+                tx.asset_account = asset_account_obj
             self.session.add(tx)
             await resolver.record_alias(normalized_name, category)
             transactions.append(tx)

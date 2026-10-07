@@ -51,6 +51,43 @@ class BotMessages:
         # Case 1: Single item formatting
         if len(tx_list) == 1:
             tx = tx_list[0]
+            cat_name = esc(tx.category.name if tx.category else "Общее")
+            asset_acc = getattr(tx, "asset_account", None)
+            asset_curr = getattr(asset_acc, "currency", None) or "USD"
+
+            # Special clear formatting for currency purchase / asset transfer with foreign/target currency
+            if tx.type == CategoryType.transfer_out and tx.asset_amount:
+                asset_sym = get_currency_symbol(asset_curr)
+                ex_rate_str = f"\n💱 <b>Курс:</b> 1 {asset_sym} = {format_amount(tx.exchange_rate, currency)}" if tx.exchange_rate else ""
+                account_str = f"\n🏦 <b>Счёт:</b> {esc(asset_acc.name)}" if asset_acc else ""
+
+                return (
+                    f"✅ <b>Записано!</b>\n\n"
+                    f"🔄 <b>Покупка валюты / Перевод</b>\n"
+                    f"💸 <b>Списано:</b> -{format_amount(tx.amount, currency)}\n"
+                    f"💰 <b>Зачислено:</b> +{format_amount(tx.asset_amount, asset_curr)}"
+                    f"{ex_rate_str}"
+                    f"{account_str}\n"
+                    f"📁 <b>Категория:</b> {cat_name}\n"
+                    f"ℹ️ <i>Общий капитал не изменился (конвертация)</i>"
+                    f"{balance_suffix}"
+                )
+            elif tx.type == CategoryType.transfer_in and tx.asset_amount:
+                asset_sym = get_currency_symbol(asset_curr)
+                ex_rate_str = f"\n💱 <b>Курс:</b> 1 {asset_sym} = {format_amount(tx.exchange_rate, currency)}" if tx.exchange_rate else ""
+                account_str = f"\n🏦 <b>Счёт:</b> {esc(asset_acc.name)}" if asset_acc else ""
+
+                return (
+                    f"✅ <b>Записано!</b>\n\n"
+                    f"🔄 <b>Продажа валюты / Вывод</b>\n"
+                    f"💰 <b>Зачислено:</b> +{format_amount(tx.amount, currency)}\n"
+                    f"💸 <b>Списано со счёта:</b> -{format_amount(tx.asset_amount, asset_curr)}"
+                    f"{ex_rate_str}"
+                    f"{account_str}\n"
+                    f"📁 <b>Категория:</b> {cat_name}"
+                    f"{balance_suffix}"
+                )
+
             if tx.type == CategoryType.transfer_out:
                 icon = "🏦"
                 type_label = "Перевод в депозит/актив"
@@ -64,11 +101,7 @@ class BotMessages:
                 icon = "💸"
                 type_label = "Расход"
 
-            cat_name = esc(tx.category.name if tx.category else "Общее")
-
             amount_str = f"<b>{format_amount(tx.amount, currency)}</b>"
-            if tx.asset_amount:
-                amount_str += f" (<b>{tx.asset_amount:g} у.е.</b>)"
             discount_line = ""
             if tx.discount_amount and tx.discount_amount > 0 and tx.original_amount:
                 amount_str += f" <s>{format_amount(tx.original_amount, currency)}</s>"

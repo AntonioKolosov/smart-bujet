@@ -105,18 +105,21 @@ class AssetService:
                 if target_name_lower in acc.name.lower() or acc.name.lower() in target_name_lower:
                     return acc
 
-        # 5. Single deposit heuristic
-        deposit_accounts = [a for a in accounts if a.type == AssetType.deposit]
+        # 5. Single deposit heuristic (only if currency matches or not specified)
+        deposit_accounts = [
+            a for a in accounts
+            if a.type == AssetType.deposit and (not target_currency or a.currency.upper() == target_currency.upper())
+        ]
         if target_type == AssetType.deposit and len(deposit_accounts) == 1:
             return deposit_accounts[0]
 
         # 6. Currency match
-        if target_type == AssetType.currency and target_currency:
+        if target_currency:
             for acc in accounts:
-                if acc.type == AssetType.currency and acc.currency.upper() == target_currency.upper():
+                if acc.currency.upper() == target_currency.upper():
                     return acc
 
-        # 7. Fallback to primary deposit
+        # 7. Fallback to primary deposit with matching currency
         if target_type == AssetType.deposit and deposit_accounts:
             return deposit_accounts[0]
 
@@ -142,8 +145,10 @@ class AssetService:
         )
         account = res.first()
         if not account:
-            if not name or "None" in name or "null" in name.lower():
-                if asset_type == AssetType.deposit:
+            if not name or "None" in name or "null" in name.lower() or "покупка" in name.lower() or "валют" in name.lower():
+                if safe_currency != "KZT":
+                    name = f"Депозит {safe_currency}"
+                elif asset_type == AssetType.deposit:
                     name = "Банковский депозит"
                 elif asset_type == AssetType.currency:
                     name = f"Наличные {safe_currency}"
