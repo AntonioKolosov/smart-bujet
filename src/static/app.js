@@ -1668,61 +1668,89 @@
       return;
     }
 
+    const groups = {};
     transactions.forEach(tx => {
-      const el = document.createElement('div');
-      el.className = 'tx-card';
-      const isInc = tx.type === 'income';
-      const isTransferOut = tx.type === 'transfer_out';
-      const isTransferIn = tx.type === 'transfer_in';
-      const authorClass = tx.is_current_user ? 'author-self' : 'author-partner';
-      const safeTitle = escapeHtml(tx.item_name || tx.category_name || 'Операция');
-      const safeAuthor = escapeHtml(tx.author_name || (tx.is_current_user ? 'Вы' : 'Партнёр'));
-      const safeCat = escapeHtml(tx.category_name || '');
-
-      let prefix = '-';
-      let amountClass = 'expense';
-      if (tx.asset_amount && isTransferOut) {
-        prefix = '-';
-        amountClass = 'expense';
-      } else if (isInc) {
-        prefix = '+';
-        amountClass = 'income';
-      } else if (isTransferOut) {
-        prefix = '→ ';
-        amountClass = 'transfer';
-      } else if (isTransferIn) {
-        prefix = '← ';
-        amountClass = 'transfer';
+      const groupKey = formatDateGroup(tx.transaction_date);
+      if (!groups[groupKey]) {
+        groups[groupKey] = [];
       }
-
-      let dualBadge = '';
-      if (tx.asset_amount) {
-        const assetCurr = tx.asset_currency || 'USD';
-        const assetSym = CURRENCY_SYMBOLS[assetCurr] || assetCurr;
-        const dualSign = isTransferOut ? '+' : '-';
-        dualBadge = `<div class="tx-dual-badge ${isTransferOut ? 'income' : 'expense'}">${dualSign}${tx.asset_amount}\u00A0${assetSym}</div>`;
-      }
-
-      el.innerHTML = `
-        <div class="tx-info">
-          <div class="tx-top-row">
-            <span class="tx-title">${safeTitle}</span>
-            <span class="author-tag ${authorClass}">${safeAuthor}</span>
-          </div>
-          <div class="tx-meta">
-            <span>${formatDateGroup(tx.transaction_date)} • ${formatTime(tx.transaction_date)}</span>
-            <span class="tx-category">${safeCat}</span>
-          </div>
-        </div>
-        <div class="tx-amounts">
-          <div class="tx-final-amount ${amountClass}">
-            ${prefix}${formatMoney(tx.amount)}
-          </div>
-          ${dualBadge}
-        </div>
-      `;
-      familyTxListEl.appendChild(el);
+      groups[groupKey].push(tx);
     });
+
+    const fragment = document.createDocumentFragment();
+
+    Object.keys(groups).forEach(dateTitle => {
+      const divider = document.createElement('div');
+      divider.className = 'date-divider';
+      divider.textContent = dateTitle;
+      fragment.appendChild(divider);
+
+      groups[dateTitle].forEach(tx => {
+        const el = document.createElement('div');
+        el.className = 'tx-card';
+        const isInc = tx.type === 'income';
+        const isTransferOut = tx.type === 'transfer_out';
+        const isTransferIn = tx.type === 'transfer_in';
+        const authorClass = tx.is_current_user ? 'author-self' : 'author-partner';
+        const safeTitle = escapeHtml(tx.item_name || tx.category_name || 'Операция');
+        const safeAuthor = escapeHtml(tx.author_name || (tx.is_current_user ? 'Вы' : 'Партнёр'));
+        const safeCat = escapeHtml(tx.category_name || 'Общее');
+
+        let prefix = '-';
+        let amountClass = 'expense';
+        if (tx.asset_amount && isTransferOut) {
+          prefix = '-';
+          amountClass = 'expense';
+        } else if (isInc) {
+          prefix = '+';
+          amountClass = 'income';
+        } else if (isTransferOut) {
+          prefix = '→ ';
+          amountClass = 'transfer';
+        } else if (isTransferIn) {
+          prefix = '← ';
+          amountClass = 'transfer';
+        }
+
+        let dualBadge = '';
+        if (tx.asset_amount) {
+          const assetCurr = tx.asset_currency || 'USD';
+          const assetSym = CURRENCY_SYMBOLS[assetCurr] || assetCurr;
+          const dualSign = isTransferOut ? '+' : '-';
+          dualBadge = `<div class="tx-dual-badge ${isTransferOut ? 'income' : 'expense'}">${dualSign}${tx.asset_amount}\u00A0${assetSym}</div>`;
+        }
+
+        let discountBadge = '';
+        if (tx.discount_amount && Number(tx.discount_amount) > 0) {
+          const origHtml = tx.original_amount ? `<span class="tx-original">${formatMoney(tx.original_amount)}</span>` : '';
+          discountBadge = `<div class="tx-discount">${origHtml}<span>-${formatMoney(tx.discount_amount)}</span></div>`;
+        }
+
+        el.innerHTML = `
+          <div class="tx-info">
+            <div class="tx-top-row">
+              <span class="tx-title">${safeTitle}</span>
+              <span class="author-tag ${authorClass}">${safeAuthor}</span>
+            </div>
+            <div class="tx-meta">
+              <span class="tx-category">${safeCat}</span>
+              <span>•</span>
+              <span>${formatTime(tx.transaction_date)}</span>
+            </div>
+          </div>
+          <div class="tx-amounts">
+            <div class="tx-final-amount ${amountClass}">
+              ${prefix}${formatMoney(tx.amount)}
+            </div>
+            ${dualBadge}
+            ${discountBadge}
+          </div>
+        `;
+        fragment.appendChild(el);
+      });
+    });
+
+    familyTxListEl.appendChild(fragment);
   }
 
   if (copyInviteBtn) {
