@@ -136,3 +136,65 @@ async def process_photo_transaction(message: Message, session: AsyncSession, bot
     except Exception as exc:
         logger.exception("Error processing receipt photo(s): %s", exc)
         await message.reply(BotMessages.service_unavailable())
+
+
+@router.message(F.document)
+async def process_document_receipt(message: Message, session: AsyncSession, bot: Bot):
+    doc = message.document
+    if not doc:
+        return
+    is_pdf = (doc.mime_type == "application/pdf") or (doc.file_name and doc.file_name.lower().endswith(".pdf"))
+    if not is_pdf:
+        return
+
+    # Check file size limit (15 MB)
+    if doc.file_size and doc.file_size > 15 * 1024 * 1024:
+        await message.reply("⚠️ Размер PDF-файла превышает лимит 15 МБ.")
+        return
+
+    await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+
+    user = await session.get(User, message.from_user.id)
+    if not user:
+        user = User(
+            id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            currency="KZT"
+        )
+        session.add(user)
+        await session.commit()
+
+    if user.initial_balance is None:
+        await message.reply(BotMessages.guard_set_balance_first())
+        return
+
+    buf = io.BytesIO()
+    await bot.download(doc.file_id, destination=buf)
+    pdf_bytes = buf.getvalue()
+
+    tx_service = TransactionService(session)
+    currency = user.currency or "KZT"
+
+    try:
+        txs = await tx_service.process_receipt_media(
+            user_id=message.from_user.id,
+            media_bytes=pdf_bytes,
+            mime_type="application/pdf"
+        )
+        bal_data = await tx_service.get_user_balance(message.from_user.id)
+        await message.reply(
+            BotMessages.tx_success(
+                txs,
+                currency=currency,
+                current_balance=bal_data["current_balance"]
+            ),
+            reply_markup=tx_toggle_keyboard(txs)
+        )
+    except OffTopicMessageError:
+        await message.reply(BotMessages.off_topic_warning("photo"))
+    except (InvalidTransactionAmountError, TransactionParseError):
+        await message.reply(BotMessages.photo_clarification())
+    except Exception as exc:
+        logger.exception("Error processing PDF receipt: %s", exc)
+        await message.reply(BotMessages.service_unavailable())

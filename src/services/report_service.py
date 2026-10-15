@@ -91,13 +91,15 @@ class ReportService:
         else:
             start_date = now - timedelta(days=30)
 
-        conditions = [Transaction.transaction_date >= start_date]
+        conditions = [
+            Transaction.transaction_date >= start_date,
+            Transaction.related_transaction_id.is_(None)
+        ]
         if family_group_id:
             conditions.append(or_(
                 Transaction.user_id == user_id,
                 Transaction.family_group_id == family_group_id
             ))
-            conditions.append(Transaction.related_transaction_id.is_(None))
         else:
             conditions.append(Transaction.user_id == user_id)
 
@@ -158,12 +160,12 @@ class ReportService:
         conditions = [
             Transaction.transaction_date >= start_date,
             Transaction.transaction_date < end_date,
-            Transaction.type == CategoryType.expense
+            Transaction.type == CategoryType.expense,
+            Transaction.related_transaction_id.is_(None)
         ]
 
         if family_group_id:
             conditions.append(Transaction.family_group_id == family_group_id)
-            conditions.append(Transaction.related_transaction_id.is_(None))
         else:
             conditions.append(Transaction.user_id == user_id)
 
@@ -226,11 +228,11 @@ class ReportService:
 
         conditions = [
             Transaction.transaction_date >= start_date,
-            Transaction.type.in_([CategoryType.expense, CategoryType.income])
+            Transaction.type.in_([CategoryType.expense, CategoryType.income]),
+            Transaction.related_transaction_id.is_(None)
         ]
         if family_group_id:
             conditions.append(Transaction.family_group_id == family_group_id)
-            conditions.append(Transaction.related_transaction_id.is_(None))
         else:
             conditions.append(Transaction.user_id == user_id)
 
@@ -350,9 +352,8 @@ class ReportService:
             Transaction.user_id.in_(target_user_ids),
             Transaction.transaction_date >= start_date,
             Transaction.transaction_date <= end_date,
+            Transaction.related_transaction_id.is_(None),
         ]
-        if is_family:
-            conditions.append(Transaction.related_transaction_id.is_(None))
 
         cashflow_query = (
             select(

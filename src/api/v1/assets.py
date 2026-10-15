@@ -23,6 +23,7 @@ class CreateAssetRequest(BaseModel):
 
 class AssetActionRequest(BaseModel):
     amount: float = Field(..., gt=0.0)
+    exchange_rate: Optional[float] = Field(default=None, gt=0.0)
     note: Optional[str] = None
 
 
@@ -118,6 +119,7 @@ async def deposit_to_asset(
             user_id=current_user.id,
             asset_id=asset_id,
             amount=payload.amount,
+            exchange_rate=payload.exchange_rate,
             note=payload.note
         )
     except ValueError as e:
@@ -148,6 +150,7 @@ async def withdraw_from_asset(
             user_id=current_user.id,
             asset_id=asset_id,
             amount=payload.amount,
+            exchange_rate=payload.exchange_rate,
             note=payload.note
         )
     except ValueError as e:

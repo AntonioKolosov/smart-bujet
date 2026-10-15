@@ -194,6 +194,7 @@ class AssetService:
         user_id: int,
         asset_id: uuid.UUID,
         amount: float,
+        exchange_rate: float | None = None,
         note: str | None = None
     ) -> AssetAccount:
         """Transfer funds from main balance into asset account."""
@@ -201,7 +202,26 @@ class AssetService:
         if not account or account.user_id != user_id:
             raise ValueError("Asset account not found")
 
-        account.balance = float(Decimal(str(account.balance)) + Decimal(str(amount)))
+        user = await self.session.get(User, user_id)
+        base_currency = (getattr(user, "currency", None) or "KZT").upper()
+        acc_currency = (getattr(account, "currency", None) or "KZT").upper()
+        is_foreign = (acc_currency != base_currency)
+
+        val_amount = Decimal(str(amount))
+        account.balance = float(Decimal(str(account.balance)) + val_amount)
+
+        if is_foreign:
+            approx_rates = {"USD": 450.0, "EUR": 490.0, "RUB": 5.0}
+            rate = Decimal(str(exchange_rate or approx_rates.get(acc_currency, 450.0)))
+            base_amount = float(val_amount * rate)
+            asset_amt = float(val_amount)
+            ex_rate = float(rate)
+            item_title = f"Покупка валюты: {account.name}"
+        else:
+            base_amount = float(val_amount)
+            asset_amt = None
+            ex_rate = None
+            item_title = f"Пополнение: {account.name}"
 
         cats = await self.category_service.get_categories(user_id, CategoryType.transfer_out)
         cat = cats[0] if cats else None
@@ -212,11 +232,14 @@ class AssetService:
 
         tx = Transaction(
             user_id=user_id,
+            family_group_id=getattr(user, "family_group_id", None),
             category_id=cat.id,
             asset_account_id=account.id,
-            amount=amount,
+            amount=base_amount,
+            asset_amount=asset_amt,
+            exchange_rate=ex_rate,
             type=CategoryType.transfer_out,
-            item_name=f"Пополнение: {account.name}",
+            item_name=item_title,
             raw_text=note,
             source=TransactionSource.manual
         )
@@ -230,6 +253,7 @@ class AssetService:
         user_id: int,
         asset_id: uuid.UUID,
         amount: float,
+        exchange_rate: float | None = None,
         note: str | None = None
     ) -> AssetAccount:
         """Withdraw funds from asset into main liquid balance."""
@@ -237,7 +261,26 @@ class AssetService:
         if not account or account.user_id != user_id:
             raise ValueError("Asset account not found")
 
-        account.balance = float(Decimal(str(account.balance)) - Decimal(str(amount)))
+        user = await self.session.get(User, user_id)
+        base_currency = (getattr(user, "currency", None) or "KZT").upper()
+        acc_currency = (getattr(account, "currency", None) or "KZT").upper()
+        is_foreign = (acc_currency != base_currency)
+
+        val_amount = Decimal(str(amount))
+        account.balance = float(Decimal(str(account.balance)) - val_amount)
+
+        if is_foreign:
+            approx_rates = {"USD": 450.0, "EUR": 490.0, "RUB": 5.0}
+            rate = Decimal(str(exchange_rate or approx_rates.get(acc_currency, 450.0)))
+            base_amount = float(val_amount * rate)
+            asset_amt = float(val_amount)
+            ex_rate = float(rate)
+            item_title = f"Продажа валюты: {account.name}"
+        else:
+            base_amount = float(val_amount)
+            asset_amt = None
+            ex_rate = None
+            item_title = f"Снятие: {account.name}"
 
         cats = await self.category_service.get_categories(user_id, CategoryType.transfer_in)
         cat = cats[0] if cats else None
@@ -248,11 +291,14 @@ class AssetService:
 
         tx = Transaction(
             user_id=user_id,
+            family_group_id=getattr(user, "family_group_id", None),
             category_id=cat.id,
             asset_account_id=account.id,
-            amount=amount,
+            amount=base_amount,
+            asset_amount=asset_amt,
+            exchange_rate=ex_rate,
             type=CategoryType.transfer_in,
-            item_name=f"Снятие: {account.name}",
+            item_name=item_title,
             raw_text=note,
             source=TransactionSource.manual
         )
@@ -457,11 +503,57 @@ class AssetService:
     async def delete_asset(
         self,
         user_id: int,
-        asset_id: uuid.UUID
+        asset_id: uuid.UUID,
+        liquidation_rate: float | None = None
     ) -> bool:
         asset = await self.get_asset_by_id(asset_id, user_id)
         if not asset:
             return False
+
+        user = await self.session.get(User, user_id)
+        base_currency = (user.currency if user and user.currency else "KZT").upper()
+        acc_currency = (asset.currency or "KZT").upper()
+        bal = Decimal(str(asset.balance or 0))
+
+        # Liquidate remaining positive balance back into user's liquid cash balance
+        if bal > Decimal("0"):
+            is_foreign = (acc_currency != base_currency)
+            if is_foreign:
+                approx_rates = {"USD": 450.0, "EUR": 490.0, "RUB": 5.0}
+                rate = Decimal(str(liquidation_rate or approx_rates.get(acc_currency, 450.0)))
+                liquid_amount = bal * rate
+                asset_amt = float(bal)
+                ex_rate = float(rate)
+                item_title = f"Продажа валюты: {asset.name}"
+            else:
+                liquid_amount = bal
+                asset_amt = None
+                ex_rate = None
+                item_title = f"Ликвидация счёта: {asset.name}"
+
+            cat_in = await self.category_service.find_by_name("Снятие с депозита", CategoryType.transfer_in, user_id)
+            if not cat_in:
+                cats = await self.category_service.get_categories(user_id, CategoryType.transfer_in)
+                cat_in = cats[0] if cats else None
+            if not cat_in:
+                cat_in = Category(name="Снятие с депозита", type=CategoryType.transfer_in, is_system=True)
+                self.session.add(cat_in)
+                await self.session.flush()
+
+            liquidation_tx = Transaction(
+                user_id=user_id,
+                family_group_id=getattr(user, "family_group_id", None),
+                category_id=cat_in.id,
+                amount=float(liquid_amount),
+                asset_amount=asset_amt,
+                exchange_rate=ex_rate,
+                type=CategoryType.transfer_in,
+                item_name=item_title,
+                raw_text=f"Возврат остатка {bal} {asset.currency} при удалении счёта",
+                source=TransactionSource.manual,
+                transaction_date=datetime.now(timezone.utc)
+            )
+            self.session.add(liquidation_tx)
 
         # 1. Delete accrued interest transactions to prevent phantom liquid income injection
         await self.session.execute(

@@ -283,6 +283,74 @@ class TransactionService:
 
         return asset_acc.id, asset_acc.name, asset_acc
 
+    async def _try_autofill_credit_payment(
+        self,
+        user_id: int,
+        context_text: str | None,
+        raw_items: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """
+        Detects if user is paying a credit monthly payment without explicitly naming the amount,
+        or if LLM returned items=[] / item with amount=0 for a loan repayment.
+        """
+        active_credits = await self.credit_service.get_user_credits(user_id, active_only=True)
+        credits_with_mp = [c for c in active_credits if c.monthly_payment and c.monthly_payment > 0]
+
+        # 1. Inspect existing items: if any item has amount <= 0 and is credit repay
+        for item in raw_items:
+            amt = float(item.get("amount") or 0.0)
+            credit_action = item.get("credit_action")
+            is_repay = (credit_action == "repay" or item.get("category") == "Погашение кредита" or bool(item.get("target_credit_name")))
+            if amt <= 0 and is_repay and credits_with_mp:
+                target_name = item.get("target_credit_name") or item.get("item_name")
+                hint_id = item.get("credit_account_id")
+                matched = await self.credit_service.resolve_credit_account(
+                    user_id=user_id,
+                    target_name=target_name,
+                    credit_id_hint=hint_id
+                )
+                if not matched and len(credits_with_mp) == 1:
+                    matched = credits_with_mp[0]
+                if matched and matched.monthly_payment and matched.monthly_payment > 0:
+                    item["amount"] = float(matched.monthly_payment)
+                    item["target_credit_name"] = matched.name
+                    item["credit_account_id"] = str(matched.id)
+                    item["credit_action"] = "repay"
+                    item["category"] = "Погашение кредита"
+                    item["item_name"] = f"Погашение: {matched.name}"
+
+        # 2. If raw_items is empty or has no valid amount items, check context_text
+        has_positive_item = any((it.get("amount") or 0) > 0 for it in raw_items)
+        if not has_positive_item and context_text and credits_with_mp:
+            txt_lower = context_text.lower()
+            is_repay_intent = (
+                ("ежемесячн" in txt_lower and ("платеж" in txt_lower or "кредит" in txt_lower or "внес" in txt_lower or "оплатил" in txt_lower))
+                or ("платеж" in txt_lower and ("кредит" in txt_lower or "рассрочк" in txt_lower or "каспи" in txt_lower or "халык" in txt_lower))
+                or (("погасил" in txt_lower or "оплатил" in txt_lower or "внес" in txt_lower) and ("кредит" in txt_lower or "рассрочк" in txt_lower))
+            )
+            if is_repay_intent:
+                matched = None
+                for c in credits_with_mp:
+                    if c.name.lower() in txt_lower:
+                        matched = c
+                        break
+                if not matched and len(credits_with_mp) == 1:
+                    matched = credits_with_mp[0]
+
+                if matched and matched.monthly_payment and matched.monthly_payment > 0:
+                    return [{
+                        "category": "Погашение кредита",
+                        "type": "expense",
+                        "amount": float(matched.monthly_payment),
+                        "item_name": f"Погашение: {matched.name}",
+                        "credit_action": "repay",
+                        "credit_account_id": str(matched.id),
+                        "target_credit_name": matched.name,
+                        "raw_text": context_text
+                    }]
+
+        return raw_items
+
     async def process_text(self, user_id: int, text: str) -> list[Transaction]:
         """
         Multi-item capable text transaction processing:
@@ -346,6 +414,7 @@ class TransactionService:
             discount_amount = payload.get("discount_amount")
             total_paid = payload.get("total_paid")
 
+        raw_items = await self._try_autofill_credit_payment(user_id, text, raw_items)
         if not raw_items:
             raise TransactionParseError("Could not parse transaction from message")
 
@@ -534,6 +603,8 @@ class TransactionService:
         if payload.get("is_financial") is False:
             raise OffTopicMessageError("Голосовое сообщение не содержит финансовых операций", raw_text=None)
         raw_items = payload.get("items", [])
+        voice_text = " ".join([str(it.get("raw_text") or it.get("item_name") or "") for it in raw_items]).strip() or None
+        raw_items = await self._try_autofill_credit_payment(user_id, voice_text, raw_items)
         if not raw_items:
             raise TransactionParseError("Could not parse voice transaction")
 
@@ -772,24 +843,28 @@ class TransactionService:
 
         return transactions, receipt_title
 
-    async def process_receipt_photo(
+    async def process_receipt_media(
         self,
         user_id: int,
-        image_bytes: bytes,
+        media_bytes: bytes,
         mime_type: str = "image/jpeg"
     ) -> list[Transaction]:
-        """Process receipt photo in-memory without saving image to disk."""
+        """Process receipt photo or PDF document in-memory without saving to disk."""
         user = await self.session.get(User, user_id)
         family_group_id = user.family_group_id if user else None
 
         available_cats = await self.category_service.get_categories(user_id)
         cat_names = list({c.name for c in available_cats})
 
-        payload = await self.ai_service.parse_receipt_photo(image_bytes, mime_type, cat_names)
+        if mime_type == "application/pdf":
+            payload = await self.ai_service.parse_receipt_media(media_bytes, mime_type, cat_names)
+        else:
+            payload = await self.ai_service.parse_receipt_photo(media_bytes, mime_type, cat_names)
         if payload.get("is_financial") is False:
-            raise OffTopicMessageError("На фотографии не обнаружен кассовый чек", raw_text=None)
+            doc_label = "PDF-документе" if mime_type == "application/pdf" else "фотографии"
+            raise OffTopicMessageError(f"В {doc_label} не обнаружен кассовый чек", raw_text=None)
         if not payload.get("items"):
-            raise TransactionParseError("Could not parse receipt photo")
+            raise TransactionParseError("Could not parse receipt")
 
         resolver = BatchCategoryResolver(self, user_id)
         transactions, _ = await self._build_transactions_from_receipt_payload(
@@ -805,6 +880,14 @@ class TransactionService:
 
         await self.session.commit()
         return transactions
+
+    async def process_receipt_photo(
+        self,
+        user_id: int,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg"
+    ) -> list[Transaction]:
+        return await self.process_receipt_media(user_id, image_bytes, mime_type)
 
     async def process_receipt_photos(
         self,
