@@ -21,3 +21,8 @@ class InvalidTransactionAmountError(TransactionParseError):
 class OffTopicMessageError(TransactionParseError):
     pass
 
+class AIRateLimitExceededError(BaseSmartBujetError):
+    def __init__(self, message: str = "Превышен лимит запросов к AI"):
+        super().__init__(message)
+        self.message = message
+

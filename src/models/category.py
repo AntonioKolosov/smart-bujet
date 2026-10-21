@@ -24,7 +24,7 @@ class Category(Base, TimestampMixin):
     __tablename__ = "categories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
+    user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     name: Mapped[str] = mapped_column(String(64))
     type: Mapped[CategoryType] = mapped_column()
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)

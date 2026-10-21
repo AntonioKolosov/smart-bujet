@@ -174,9 +174,16 @@ class AIService:
         assets_context: list[dict[str, Any]] | None = None,
         credits_context: list[dict[str, Any]] | None = None,
         few_shots_prompt: str = "",
-        known_names: list[str] | None = None
+        known_names: list[str] | None = None,
+        user_id: int | None = None
     ) -> dict[str, Any]:
         """Classify message into items and optional discount parameters."""
+        if user_id is not None:
+            allowed, reason = ai_rate_limiter.check_and_record(user_id)
+            if not allowed:
+                from src.core.exceptions import AIRateLimitExceededError
+                raise AIRateLimitExceededError(reason)
+
         if not self.client:
             return {
                 "items": [{
@@ -257,9 +264,16 @@ class AIService:
         categories: list[str],
         assets_context: list[dict[str, Any]] | None = None,
         credits_context: list[dict[str, Any]] | None = None,
-        few_shots_prompt: str = ""
+        few_shots_prompt: str = "",
+        user_id: int | None = None
     ) -> dict[str, Any]:
         """In-memory voice message processing with discount and income extraction."""
+        if user_id is not None:
+            allowed, reason = ai_rate_limiter.check_and_record(user_id)
+            if not allowed:
+                from src.core.exceptions import AIRateLimitExceededError
+                raise AIRateLimitExceededError(reason)
+
         if not self.client:
             return {"is_financial": True, "items": []}
 
@@ -329,9 +343,16 @@ class AIService:
         self,
         media_bytes: bytes,
         mime_type: str,
-        categories: list[str]
+        categories: list[str],
+        user_id: int | None = None
     ) -> dict[str, Any]:
         """In-memory receipt photo or PDF document processing with discount and total extraction."""
+        if user_id is not None:
+            allowed, reason = ai_rate_limiter.check_and_record(user_id)
+            if not allowed:
+                from src.core.exceptions import AIRateLimitExceededError
+                raise AIRateLimitExceededError(reason)
+
         if not self.client:
             return {"is_financial": True, "items": []}
 
@@ -389,31 +410,39 @@ class AIService:
         self,
         image_bytes: bytes,
         mime_type: str,
-        categories: list[str]
+        categories: list[str],
+        user_id: int | None = None
     ) -> dict[str, Any]:
         """Backward-compatible alias for parse_receipt_media."""
-        return await self.parse_receipt_media(image_bytes, mime_type, categories)
+        return await self.parse_receipt_media(image_bytes, mime_type, categories, user_id=user_id)
 
     async def parse_receipt_photos(
         self,
         images: list[bytes],
         mime_type: str,
-        categories: list[str]
+        categories: list[str],
+        user_id: int | None = None
     ) -> list[dict[str, Any]]:
         """Concurrent parsing of multiple receipt photos."""
         if not images:
             return []
-        tasks = [self.parse_receipt_photo(img, mime_type, categories) for img in images]
+        tasks = [self.parse_receipt_photo(img, mime_type, categories, user_id=user_id) for img in images]
         return await asyncio.gather(*tasks)
 
     async def generate_financial_advice(
         self,
-        summary: Any
+        summary: Any,
+        user_id: int | None = None
     ) -> dict[str, str]:
         """
         Generates compact, high-precision financial recommendations using Gemini 3.8 Flash.
         Falls back gracefully to deterministic rule-based advice on any failure.
         """
+        if user_id is not None:
+            allowed, _ = ai_rate_limiter.check_and_record(user_id)
+            if not allowed:
+                return self._generate_rule_based_advice(summary)
+
         if not self.client:
             return self._generate_rule_based_advice(summary)
 

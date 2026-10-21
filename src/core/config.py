@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     webhook_secret: str = Field(default_factory=lambda: secrets.token_urlsafe(32), validation_alias="WEBHOOK_SECRET")
     gemini_model: str = Field(default="gemini-3.8-flash", validation_alias="GEMINI_MODEL")
     bot_username: str = Field(default="smartbujetbot", validation_alias="BOT_USERNAME")
+    data_encryption_key: str | None = Field(default=None, validation_alias="DATA_ENCRYPTION_KEY")
+    blind_index_secret: str | None = Field(default=None, validation_alias="BLIND_INDEX_SECRET")
 
     @property
     def bot_token(self) -> str:

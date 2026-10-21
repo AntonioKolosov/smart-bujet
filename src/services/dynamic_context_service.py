@@ -219,9 +219,14 @@ class DynamicContextService:
 
     async def sanitize_poisoned_aliases(self) -> None:
         """Clean up previously poisoned aliases (e.g. debt return wrongly recorded as expense)."""
+        from src.core.security import blind_index
+        poisoned_hashes = [
+            blind_index(p) for p in ("друг вернул", "вернул долг", "возврат долга")
+        ]
         await self.session.execute(
             delete(UserItemAlias).where(
-                UserItemAlias.item_name_normalized.ilike("%друг вернул%")
+                UserItemAlias.item_name_normalized.in_(poisoned_hashes)
+                | UserItemAlias.item_name_normalized.ilike("%друг вернул%")
                 | UserItemAlias.item_name_normalized.ilike("%вернул долг%")
                 | UserItemAlias.item_name_normalized.ilike("%возврат долга%")
             )

@@ -419,7 +419,7 @@ class AssetService:
             amount=float(monthly_interest),
             type=CategoryType.income,
             item_name=f"Проценты: {account.name}",
-            raw_text=f"Ежемесячное начисление процентов за {month_label} ({account.interest_rate}% год.)",
+            raw_text=None,
             source=TransactionSource.manual,
             transaction_date=now,
         )
@@ -549,7 +549,7 @@ class AssetService:
                 exchange_rate=ex_rate,
                 type=CategoryType.transfer_in,
                 item_name=item_title,
-                raw_text=f"Возврат остатка {bal} {asset.currency} при удалении счёта",
+                raw_text=None,
                 source=TransactionSource.manual,
                 transaction_date=datetime.now(timezone.utc)
             )

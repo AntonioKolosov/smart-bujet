@@ -11,6 +11,7 @@ from sqlalchemy.sql import func
 
 from src.models.base import Base, TimestampMixin
 from src.models.category import CategoryType
+from src.core.security import EncryptedString
 
 if TYPE_CHECKING:
     from src.models.user import User
@@ -25,14 +26,15 @@ class TransactionSource(str, Enum):
     voice = "voice"
     photo = "photo"
     manual = "manual"
+    statement = "statement"
 
 
 class Transaction(Base, TimestampMixin):
     __tablename__ = "transactions"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
-    family_group_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("family_groups.id"))
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    family_group_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("family_groups.id"), nullable=True)
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
     amount: Mapped[float] = mapped_column(Numeric(12, 2))
     original_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
@@ -43,9 +45,9 @@ class Transaction(Base, TimestampMixin):
     exchange_rate: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     related_transaction_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True)
     credit_account_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("credit_accounts.id", ondelete="SET NULL"), nullable=True)
-    item_name: Mapped[str | None] = mapped_column(String(255))
-    raw_text: Mapped[str | None] = mapped_column(Text)
-    source: Mapped[TransactionSource] = mapped_column()
+    item_name: Mapped[str | None] = mapped_column(EncryptedString(512), nullable=True)
+    raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[TransactionSource] = mapped_column(default=TransactionSource.manual)
     transaction_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now())
 
     user: Mapped["User"] = relationship("User", back_populates="transactions")
@@ -58,9 +60,3 @@ class Transaction(Base, TimestampMixin):
     @property
     def category_name(self) -> str | None:
         return self.category.name if self.category else None
-
-    @property
-    def asset_currency(self) -> str | None:
-        if self.asset_amount and self.asset_account:
-            return self.asset_account.currency
-        return None

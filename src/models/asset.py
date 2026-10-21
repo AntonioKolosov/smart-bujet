@@ -8,6 +8,7 @@ from sqlalchemy import BigInteger, String, Numeric, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin
+from src.core.security import EncryptedString
 
 if TYPE_CHECKING:
     from src.models.user import User
@@ -25,8 +26,8 @@ class AssetAccount(Base, TimestampMixin):
     __tablename__ = "asset_accounts"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
-    name: Mapped[str] = mapped_column(String(128))
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(EncryptedString(512), nullable=False)
     type: Mapped[AssetType] = mapped_column(String(32), default=AssetType.deposit)
     currency: Mapped[str] = mapped_column(String(3), default="KZT")
     balance: Mapped[float] = mapped_column(Numeric(14, 2), default=0.0)
