@@ -3,7 +3,6 @@ import uuid
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.models.agent_memory import FactCategory, UserAgentMemory
 from src.models.asset import AssetAccount, AssetType
 from src.models.category import Category, CategoryType
 from src.models.transaction import Transaction, TransactionSource
@@ -11,9 +10,10 @@ from src.models.user import User
 from src.services.ai_service import AIService, AIRateLimiter
 from src.services.transaction_service import TransactionService
 from src.api.v1.webhook import is_duplicate_update
+from src.bot.keyboards.inline import tx_toggle_keyboard
 
 
-class TestPersonalizationAndArgonSecurity(unittest.IsolatedAsyncioTestCase):
+class TestArgonSecurity(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.session = AsyncMock()
         self.ai_service = AIService()
@@ -25,32 +25,10 @@ class TestPersonalizationAndArgonSecurity(unittest.IsolatedAsyncioTestCase):
             family_group_id=None
         )
 
-    def test_fact_rule_based_classifier(self):
-        # Goal
-        res_goal = self.ai_service._classify_fact_rule_based("Хочу накопить 1 000 000 ₸ на отпуск в июле")
-        self.assertEqual(res_goal["category"], "goal")
-
-        # Habit
-        res_habit = self.ai_service._classify_fact_rule_based("Каждое утро покупаю кофе за 1500 тенге")
-        self.assertEqual(res_habit["category"], "habit")
-
-        # Schedule
-        res_sched = self.ai_service._classify_fact_rule_based("Зарплата 10-го и 25-го числа каждого месяца")
-        self.assertEqual(res_sched["category"], "schedule")
-
-        # Constraint
-        res_constraint = self.ai_service._classify_fact_rule_based("Не больше 20 000 на такси в месяц")
-        self.assertEqual(res_constraint["category"], "constraint")
-
-        # Other / General
-        res_other = self.ai_service._classify_fact_rule_based("Работаю удаленно, дома двое детей")
-        self.assertEqual(res_other["category"], "other")
-
     def test_ai_rate_limiter(self):
         limiter = AIRateLimiter(max_per_minute=3, max_per_day=5)
-        user_id = 999
+        user_id = 999999
 
-        # First 3 calls succeed
         allowed1, _ = limiter.check_and_record(user_id)
         allowed2, _ = limiter.check_and_record(user_id)
         allowed3, _ = limiter.check_and_record(user_id)
@@ -69,6 +47,27 @@ class TestPersonalizationAndArgonSecurity(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_duplicate_update(update_id))
         # Immediate duplicate arrival is detected
         self.assertTrue(is_duplicate_update(update_id))
+
+    def test_tx_toggle_keyboard_always_has_back_to_menu(self):
+        """Test that tx_toggle_keyboard always includes 'Вернуться в меню'."""
+        # 1. Single expense
+        tx_exp = Transaction(id=uuid.uuid4(), amount=1000.0, type=CategoryType.expense)
+        kb_exp = tx_toggle_keyboard(tx_exp)
+        self.assertIsNotNone(kb_exp)
+        # Row 1: toggle, Row 2: back to menu
+        self.assertEqual(len(kb_exp.inline_keyboard), 2)
+        self.assertEqual(kb_exp.inline_keyboard[0][0].text, "🔄 Это доход")
+        self.assertEqual(kb_exp.inline_keyboard[1][0].text, "📋 Вернуться в меню")
+        self.assertEqual(kb_exp.inline_keyboard[1][0].callback_data, "sum:back:main")
+
+        # 2. Transfer out (e.g. cash deposit / currency purchase)
+        tx_transfer = Transaction(id=uuid.uuid4(), amount=640000.0, type=CategoryType.transfer_out)
+        kb_transfer = tx_toggle_keyboard(tx_transfer)
+        self.assertIsNotNone(kb_transfer)
+        # Sole Row: back to menu
+        self.assertEqual(len(kb_transfer.inline_keyboard), 1)
+        self.assertEqual(kb_transfer.inline_keyboard[0][0].text, "📋 Вернуться в меню")
+        self.assertEqual(kb_transfer.inline_keyboard[0][0].callback_data, "sum:back:main")
 
     async def test_update_transaction_currency_division_formula(self):
         """

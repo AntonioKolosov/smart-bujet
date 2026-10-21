@@ -293,34 +293,6 @@
         </div>
       </div>
     </section>
-
-    <!-- Tab 5: Personalization / Agent Facts -->
-    <section id="tab-facts" class="tab-pane">
-      <div class="facts-hero">
-        <div class="facts-header-row">
-          <div>
-            <div class="facts-title">🧠 Память агента</div>
-            <div class="facts-subtitle">Цели, привычки и расписание — агент учитывает их в советах</div>
-          </div>
-          <button id="addFactBtn" class="primary-btn-sm" style="background: var(--button-color, #0284c7); color: #fff; border: none; border-radius: 10px; padding: 8px 14px; font-weight: 600; font-size: 0.85rem; cursor: pointer; white-space: nowrap;">+ Добавить факт</button>
-        </div>
-      </div>
-
-      <div id="factsLoader" class="loader-container hidden">
-        <div class="spinner"></div>
-        <p>Загрузка фактов...</p>
-      </div>
-
-      <div id="factsError" class="error-banner hidden"></div>
-
-      <div id="factsEmptyState" class="empty-banner hidden">
-        <div class="empty-icon">💡</div>
-        <p class="empty-title">Фактов пока нет</p>
-        <span class="empty-desc">Нажмите «+ Добавить факт» и расскажите агенту: «Хочу накопить 1 000 000 ₸ на отпуск» или «Зарплата 10 и 25 числа». Агент сам определит категорию!</span>
-      </div>
-
-      <div id="factsList" class="facts-list"></div>
-    </section>
   </div>
 
   <!-- Modal: Add Asset -->
@@ -612,54 +584,6 @@
     </div>
   </div>
 
-  <!-- Modal: Add / Edit Fact -->
-  <div id="factModal" class="modal-overlay hidden">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3 class="modal-title" id="factModalTitle">Новый факт о себе</h3>
-        <button id="closeFactModalBtn" class="close-btn">&times;</button>
-      </div>
-      <form id="factForm" class="modal-form">
-        <div id="factModalError" class="error-banner hidden" style="margin-bottom: 0;"></div>
-        <input type="hidden" id="factIdInput" />
-
-        <label class="form-label">
-          <span class="form-label-title">Что должен знать агент?</span>
-          <textarea id="factTextInput" class="form-input" rows="3" placeholder="Например: Пью кофе каждое утро за 1500 тенге, или Зарплата 10-го и 25-го числа" required style="resize: vertical; min-height: 70px;"></textarea>
-        </label>
-
-        <label class="form-label">
-          <span class="form-label-title">Категория (необязательно)</span>
-          <select id="factCategorySelect" class="form-select">
-            <option value="">🤖 Автоматически (AI распределит сам)</option>
-            <option value="goal">🎯 Цель</option>
-            <option value="habit">🔄 Привычка</option>
-            <option value="schedule">📅 Расписание</option>
-            <option value="constraint">⛔ Ограничение</option>
-            <option value="other">💡 Заметка</option>
-          </select>
-        </label>
-
-        <div class="modal-actions-row">
-          <button type="button" id="cancelFactBtn" class="secondary-btn-modal">Отмена</button>
-          <button type="submit" id="saveFactBtn" class="modal-submit-btn">Сохранить</button>
-        </div>
-
-        <div id="deleteFactRow" class="modal-danger-row hidden">
-          <button type="button" id="deleteFactBtn" class="danger-btn-modal">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              <line x1="10" y1="11" x2="10" y2="17"></line>
-              <line x1="14" y1="11" x2="14" y2="17"></line>
-            </svg>
-            Удалить факт
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-
   <!-- Persistent Bottom Navigation Bar -->
   <nav class="bottom-nav">
     <button class="nav-item active" id="navOpsBtn" data-tab="tab-operations">
@@ -678,12 +602,8 @@
       <span class="nav-icon">📊</span>
       <span class="nav-text">Аналитика</span>
     </button>
-    <button class="nav-item" id="navFactsBtn" data-tab="tab-facts">
-      <span class="nav-icon">🧠</span>
-      <span class="nav-text">Память</span>
-    </button>
   </nav>
 
-  <script src="/static/app.js?v=2.15"></script>
+  <script src="/static/app.js?v=2.16"></script>
 </body>
 </html>
