@@ -31,7 +31,7 @@ class FamilyService:
                 return group
 
         invite_code = secrets.token_urlsafe(8)
-        base_name = f"Семья {user.first_name}".strip() if user.first_name else "Семейный бюджет"
+        base_name = "Семейный бюджет"
         group = FamilyGroup(
             name=base_name,
             owner_id=user.id,

@@ -29,10 +29,14 @@ def welcome_back_keyboard(miniapp_url: str | None = None) -> InlineKeyboardMarku
         deposits_url = f"{miniapp_url}?page=deposits" if "?" not in miniapp_url else f"{miniapp_url}&page=deposits"
         credits_url = f"{miniapp_url}?page=credits" if "?" not in miniapp_url else f"{miniapp_url}&page=credits"
         analytics_url = f"{miniapp_url}?page=analytics" if "?" not in miniapp_url else f"{miniapp_url}&page=analytics"
+        facts_url = f"{miniapp_url}?page=facts" if "?" not in miniapp_url else f"{miniapp_url}&page=facts"
         rows.append([
             InlineKeyboardButton(text="🏦 Депозиты", web_app=WebAppInfo(url=deposits_url)),
             InlineKeyboardButton(text="💳 Кредиты", web_app=WebAppInfo(url=credits_url)),
             InlineKeyboardButton(text="📊 Аналитика", web_app=WebAppInfo(url=analytics_url)),
+        ])
+        rows.append([
+            InlineKeyboardButton(text="🧠 Персонализация", web_app=WebAppInfo(url=facts_url)),
         ])
     rows.append([
         InlineKeyboardButton(text="📊 Сводка от агента", callback_data="sum:menu"),

@@ -166,7 +166,7 @@ class TransactionService:
             amount=primary_tx.amount,
             type=CategoryType.income,
             item_name=f"Перевод от: {sender_name}",
-            raw_text=raw_msg,
+            raw_text=None,
             source=TransactionSource.manual,
         )
         tx_mirror.category = mirror_cat
@@ -398,6 +398,21 @@ class TransactionService:
                 }
                 for c in user_credits
             ]
+            known_names: list[str] = []
+            if user and user.first_name:
+                known_names.append(user.first_name)
+            if user and user.family_group_id:
+                partner_names = (await self.session.scalars(
+                    select(User.first_name).where(
+                        User.family_group_id == user.family_group_id,
+                        User.id != user_id,
+                        User.first_name.isnot(None)
+                    )
+                )).all()
+                for n in partner_names:
+                    if n and n.strip():
+                        known_names.append(n.strip())
+
             few_shots = await self.dynamic_service.get_few_shots_for_query(text)
             few_shots_prompt = self.dynamic_service.format_few_shots_prompt(few_shots)
             payload = await self.ai_service.classify_text(
@@ -405,7 +420,8 @@ class TransactionService:
                 cat_names,
                 assets_context=assets_context,
                 credits_context=credits_context,
-                few_shots_prompt=few_shots_prompt
+                few_shots_prompt=few_shots_prompt,
+                known_names=known_names
             )
             if payload.get("is_financial") is False:
                 raise OffTopicMessageError("Сообщение не относится к финансовым операциям", raw_text=text)
@@ -536,7 +552,7 @@ class TransactionService:
                 asset_amount=float(asset_amt) if asset_amt is not None else None,
                 exchange_rate=float(ex_rate) if ex_rate is not None else None,
                 item_name=normalized_name,
-                raw_text=text,
+                raw_text=None,
                 source=TransactionSource.text,
             )
             tx.category = category
@@ -825,7 +841,7 @@ class TransactionService:
                 discount_amount=float(disc_amt) if disc_amt is not None else None,
                 type=cat_type,
                 item_name=normalized_name,
-                raw_text="[Фото чека]",
+                raw_text=None,
                 source=TransactionSource.photo,
             )
             tx.category = category
@@ -1137,11 +1153,11 @@ class TransactionService:
             if delta != Decimal("0"):
                 # Asset / Deposit adjustment
                 if tx.asset_account_id:
-                    asset = await self.session.get(AssetAccount, tx.asset_account_id)
+                    asset = await self.session.get(AssetAccount, tx.asset_account_id, with_for_update=True)
                     if asset:
                         old_asset_amt = Decimal(str(tx.asset_amount if tx.asset_amount is not None else old_amount))
-                        if tx.exchange_rate:
-                            new_asset_amt = new_amount * Decimal(str(tx.exchange_rate))
+                        if tx.exchange_rate and Decimal(str(tx.exchange_rate)) > 0:
+                            new_asset_amt = new_amount / Decimal(str(tx.exchange_rate))
                         else:
                             new_asset_amt = new_amount
                         asset_delta = new_asset_amt - old_asset_amt
@@ -1156,7 +1172,7 @@ class TransactionService:
 
                 # Credit adjustment
                 if tx.credit_account_id:
-                    credit = await self.session.get(CreditAccount, tx.credit_account_id)
+                    credit = await self.session.get(CreditAccount, tx.credit_account_id, with_for_update=True)
                     if credit:
                         curr_rem = Decimal(str(credit.remaining_amount or 0))
                         if tx.type == CategoryType.expense:
@@ -1411,7 +1427,7 @@ class TransactionService:
             amount=float(data.amount),
             type=tx_type,
             item_name=data.item_name.strip() if data.item_name else category.name,
-            raw_text=data.raw_text,
+            raw_text=None,
             source=TransactionSource.manual,
             transaction_date=data.transaction_date or datetime.now(timezone.utc)
         )
