@@ -109,10 +109,10 @@ async def run_migration():
         logger.info("8. Neutralizing family names...")
         await conn.execute(text("UPDATE family_groups SET name = 'Семейный бюджет' WHERE name LIKE 'Семья %';"))
 
-        # Clear classification feedback raw_text if exists
+        # Clear classification feedback original_text if exists
         res = await conn.execute(text("SELECT to_regclass('user_classification_feedback');"))
         if res.scalar():
-            await conn.execute(text("UPDATE user_classification_feedback SET raw_text = NULL WHERE raw_text IS NOT NULL;"))
+            await conn.execute(text("UPDATE user_classification_feedback SET original_text = NULL WHERE original_text IS NOT NULL;"))
 
         # Memory facts if table exists
         res = await conn.execute(text("SELECT to_regclass('user_agent_memories');"))
