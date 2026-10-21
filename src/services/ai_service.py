@@ -3,6 +3,8 @@ import logging
 import re
 import asyncio
 import math
+import time
+from collections import defaultdict
 from decimal import Decimal
 from typing import Any
 try:
@@ -404,13 +406,35 @@ class AIService:
         tasks = [self.parse_receipt_photo(img, mime_type, categories) for img in images]
         return await asyncio.gather(*tasks)
 
-    async def generate_financial_advice(self, summary: Any) -> dict[str, str]:
+    async def generate_financial_advice(
+        self,
+        summary: Any,
+        facts: list[Any] | None = None
+    ) -> dict[str, str]:
         """
         Generates compact, high-precision financial recommendations using Gemini 3.8 Flash.
         Falls back gracefully to deterministic rule-based advice on any failure.
         """
         if not self.client:
             return self._generate_rule_based_advice(summary)
+
+        facts_block = ""
+        if facts:
+            lines = []
+            for f in facts:
+                cat_name = getattr(f, "category", "other")
+                text = getattr(f, "fact_text", "")
+                if text:
+                    lines.append(f"- [{cat_name}]: {text}")
+            if lines:
+                facts_block = (
+                    "\nДОЛГОСРОЧНЫЙ КОНТЕКСТ И ФАКТЫ ПОЛЬЗОВАТЕЛЯ (ЦЕЛИ, ПРИВЫЧКИ, РАСПИСАНИЕ, ОГРАНИЧЕНИЯ):\n"
+                    + "\n".join(lines)
+                    + "\nВАЖНО: Обязательно учитывай цели, привычки и расписание пользователя выше! "
+                    "В 'where_to_cut' опирайся на его привычки и ограничения. "
+                    "В 'where_to_save' соотноси сумму с его целями. "
+                    "В 'what_to_watch' напоминай о расписании платежей или рисках не уложиться в цель.\n"
+                )
 
         payload = {
             "period": getattr(summary, "period", "month"),
@@ -440,7 +464,8 @@ class AIService:
             "Ты — персональный финансовый консультант Smart Bujet.\n"
             "На основе готовых рассчитанных показателей пользователя сформируй строго 3 персональные рекомендации.\n"
             "Не пересчитывай цифры, они проверены в SQL. Не используй общие фразы — дай конкретные советы с цифрами.\n\n"
-            f"ФИНАНСОВЫЙ СРЕЗ:\n{json.dumps(payload, ensure_ascii=False)}\n\n"
+            f"ФИНАНСОВЫЙ СРЕЗ:\n{json.dumps(payload, ensure_ascii=False)}\n"
+            f"{facts_block}\n"
             "ФОРМАТ ОТВЕТА (СТРОГО JSON):\n"
             "{\n"
             '  "where_to_cut": "1-2 емких предложения: где именно сократить расходы исходя из топ-категорий",\n'
@@ -530,6 +555,97 @@ class AIService:
                 f"Необходимо пересмотреть траты для возврата в профицит."
             )
         return f"Отличный темп: норма сбережений {rate}%. Подушка безопасности закрывает {runway:.1f} мес."
+
+    async def classify_user_fact(self, fact_text: str) -> dict[str, Any]:
+        """
+        Classifies user freeform fact into category: goal, habit, schedule, constraint, other.
+        Falls back gracefully to deterministic regex matching if Gemini client is unavailable.
+        """
+        clean_text = fact_text.strip()
+        if not clean_text:
+            return {"category": "other", "confidence": 1.0}
+
+        if not self.client:
+            return self._classify_fact_rule_based(clean_text)
+
+        prompt = (
+            "Ты — модуль классификации долгосрочной памяти финансового ассистента.\n"
+            "Твоя задача: определить категорию факта пользователя о себе.\n\n"
+            "КАТЕГОРИИ:\n"
+            "- 'goal': цели, накопления, планы покупок («хочу накопить на авто», «закрыть кредит до лета», «купить айфон»)\n"
+            "- 'habit': привычки, рутина, регулярные паттерны («пью кофе каждое утро», «по субботам хожу на рынок», «заказываю такси»)\n"
+            "- 'schedule': календарные даты, дни зарплаты, график счетов («зарплата 10 и 25 числа», «оплата аренды 1-го числа», «платеж 15-го»)\n"
+            "- 'constraint': финансовые лимиты, ограничения, диеты («не больше 15000 на фастфуд», «лимит 50к на рестораны», «откладывать 10%»)\n"
+            "- 'other': общие заметки о жизни, семье или работе («двое детей», «работаю удаленно», «есть кот»)\n\n"
+            f"ТЕКСТ ФАКТА: \"{clean_text}\"\n\n"
+            "Верни СТРОГО JSON-объект формата:\n"
+            "{\n"
+            '  "category": "goal" | "habit" | "schedule" | "constraint" | "other",\n'
+            '  "confidence": 0.95\n'
+            "}"
+        )
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.0
+                )
+            )
+            raw = response.text.strip()
+            if raw.startswith("```"):
+                raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.MULTILINE).strip()
+            data = json.loads(raw)
+            cat = str(data.get("category", "other")).lower()
+            if cat not in ("goal", "habit", "schedule", "constraint", "other"):
+                cat = "other"
+            return {"category": cat, "confidence": float(data.get("confidence", 0.9))}
+        except Exception as exc:
+            logger.warning("AI classify_user_fact failed, falling back to rule-based: %s", exc)
+            return self._classify_fact_rule_based(clean_text)
+
+    def _classify_fact_rule_based(self, text: str) -> dict[str, Any]:
+        lower = text.lower()
+        if any(w in lower for w in ("зарплат", "числа", "число", "аренд", "календар", "график", "каждый понедельник", "по пятницам")):
+            return {"category": "schedule", "confidence": 0.85}
+        if any(w in lower for w in ("накопить", "цель", "хочу купить", "планирую", "отложить на", "купить к")):
+            return {"category": "goal", "confidence": 0.85}
+        if any(w in lower for w in ("не больше", "лимит", "ограничение", "запрет", "максимум", "не тратить")):
+            return {"category": "constraint", "confidence": 0.85}
+        if any(w in lower for w in ("каждое утро", "привык", "привычка", "часто", "регулярно", "кофе", "каждый день")):
+            return {"category": "habit", "confidence": 0.85}
+        return {"category": "other", "confidence": 0.7}
+
+
+class AIRateLimiter:
+    """Sliding-window per-user in-memory rate limiter."""
+    def __init__(self, max_per_minute: int = 20, max_per_day: int = 200):
+        self.max_per_minute = max_per_minute
+        self.max_per_day = max_per_day
+        self.user_requests = defaultdict(list)
+
+    def check_and_record(self, user_id: int) -> tuple[bool, str]:
+        now = time.time()
+        minute_ago = now - 60
+        day_ago = now - 86400
+
+        timestamps = [t for t in self.user_requests[user_id] if t > day_ago]
+        self.user_requests[user_id] = timestamps
+
+        recent_minute = [t for t in timestamps if t > minute_ago]
+        if len(recent_minute) >= self.max_per_minute:
+            return False, "Превышен минутный лимит запросов к AI. Подождите 30 секунд."
+        if len(timestamps) >= self.max_per_day:
+            return False, "Превышен суточный лимит запросов к AI."
+
+        self.user_requests[user_id].append(now)
+        return True, ""
+
+
+ai_rate_limiter = AIRateLimiter()
+
 
 
 

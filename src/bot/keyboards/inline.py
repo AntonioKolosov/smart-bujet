@@ -29,15 +29,36 @@ def welcome_back_keyboard(miniapp_url: str | None = None) -> InlineKeyboardMarku
         deposits_url = f"{miniapp_url}?page=deposits" if "?" not in miniapp_url else f"{miniapp_url}&page=deposits"
         credits_url = f"{miniapp_url}?page=credits" if "?" not in miniapp_url else f"{miniapp_url}&page=credits"
         analytics_url = f"{miniapp_url}?page=analytics" if "?" not in miniapp_url else f"{miniapp_url}&page=analytics"
+        facts_url = f"{miniapp_url}?page=facts" if "?" not in miniapp_url else f"{miniapp_url}&page=facts"
         rows.append([
             InlineKeyboardButton(text="🏦 Депозиты", web_app=WebAppInfo(url=deposits_url)),
             InlineKeyboardButton(text="💳 Кредиты", web_app=WebAppInfo(url=credits_url)),
             InlineKeyboardButton(text="📊 Аналитика", web_app=WebAppInfo(url=analytics_url)),
         ])
+        rows.append([
+            InlineKeyboardButton(text="🧠 Персонализация", web_app=WebAppInfo(url=facts_url)),
+        ])
     rows.append([
         InlineKeyboardButton(text="📊 Сводка от агента", callback_data="sum:menu"),
         InlineKeyboardButton(text="💱 Изменить валюту", callback_data="change_currency"),
     ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def onboarding_choice_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🚀 Начать с нуля", callback_data="onboard:fresh"),
+                InlineKeyboardButton(text="📄 Загрузить историю", callback_data="onboard:statement"),
+            ]
+        ]
+    )
+
+def statement_upload_keyboard(collected_count: int = 0) -> InlineKeyboardMarkup:
+    rows = []
+    if collected_count > 0:
+        rows.append([InlineKeyboardButton(text=f"✅ Готово, обработать ({collected_count} файлов)", callback_data="statement:process")])
+    rows.append([InlineKeyboardButton(text="🚀 Начать с нуля", callback_data="onboard:fresh")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def analytics_keyboard(analytics_url: str) -> InlineKeyboardMarkup:
@@ -85,39 +106,33 @@ def confirm_transaction_keyboard(tx_id: int) -> InlineKeyboardMarkup:
         ]
     )
 
-def tx_toggle_keyboard(transactions: Any) -> InlineKeyboardMarkup | None:
-    """Generate dynamic toggle button: [🔄 Это доход] if expense, [🔄 Это расход] if income."""
+def tx_toggle_keyboard(transactions: Any) -> InlineKeyboardMarkup:
+    """Generate dynamic confirmation keyboard:
+    - Row 1..N: Dynamic toggle button(s) [🔄 Это доход] / [🔄 Это расход] (for expense/income).
+    - Bottom row: Always [📋 Вернуться в меню] (callback_data="sum:back:main").
+    Works for single tx, batch txs, and transfers/deposits.
+    """
     from src.models.category import CategoryType
 
     tx_list = [transactions] if not isinstance(transactions, list) else transactions
-    if not tx_list:
-        return None
-
-    if len(tx_list) == 1:
-        tx = tx_list[0]
-        tx_type = getattr(tx, "type", None)
-        if tx_type == CategoryType.expense:
-            btn_text = "🔄 Это доход"
-        elif tx_type == CategoryType.income:
-            btn_text = "🔄 Это расход"
-        else:
-            return None
-        return InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text=btn_text, callback_data=f"tx_toggle:{tx.id}")]
-            ]
-        )
-
-    # Multi-item batch
     rows = []
-    for idx, tx in enumerate(tx_list[:4], start=1):
-        tx_type = getattr(tx, "type", None)
-        if tx_type == CategoryType.expense:
-            lbl = f"🔄 #{idx} Это доход"
-        elif tx_type == CategoryType.income:
-            lbl = f"🔄 #{idx} Это расход"
-        else:
-            continue
-        rows.append([InlineKeyboardButton(text=lbl, callback_data=f"tx_toggle:{tx.id}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
+    if tx_list:
+        if len(tx_list) == 1:
+            tx = tx_list[0]
+            tx_type = getattr(tx, "type", None)
+            if tx_type == CategoryType.expense:
+                rows.append([InlineKeyboardButton(text="🔄 Это доход", callback_data=f"tx_toggle:{tx.id}")])
+            elif tx_type == CategoryType.income:
+                rows.append([InlineKeyboardButton(text="🔄 Это расход", callback_data=f"tx_toggle:{tx.id}")])
+        else:
+            for idx, tx in enumerate(tx_list[:4], start=1):
+                tx_type = getattr(tx, "type", None)
+                if tx_type == CategoryType.expense:
+                    rows.append([InlineKeyboardButton(text=f"🔄 #{idx} Это доход", callback_data=f"tx_toggle:{tx.id}")])
+                elif tx_type == CategoryType.income:
+                    rows.append([InlineKeyboardButton(text=f"🔄 #{idx} Это расход", callback_data=f"tx_toggle:{tx.id}")])
+
+    # Always append the 'Вернуться в меню' button as the bottom row
+    rows.append([InlineKeyboardButton(text="📋 Вернуться в меню", callback_data="sum:back:main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

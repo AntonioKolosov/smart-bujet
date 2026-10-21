@@ -56,9 +56,10 @@ class TestTxToggleKeyboard(unittest.TestCase):
 
         kb = tx_toggle_keyboard([tx1, tx2])
         self.assertIsNotNone(kb)
-        self.assertEqual(len(kb.inline_keyboard), 2)
+        self.assertEqual(len(kb.inline_keyboard), 3)
         self.assertEqual(kb.inline_keyboard[0][0].text, "🔄 #1 Это доход")
         self.assertEqual(kb.inline_keyboard[1][0].text, "🔄 #2 Это расход")
+        self.assertIn("меню", kb.inline_keyboard[2][0].text.lower())
 
 
 class TestDynamicContextService(unittest.IsolatedAsyncioTestCase):

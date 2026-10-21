@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
+    from src.models.agent_memory import UserAgentMemory
     from src.models.alias import UserItemAlias
     from src.models.family import FamilyGroup
     from src.models.transaction import Transaction
@@ -27,5 +28,6 @@ class User(Base, TimestampMixin):
 
     transactions: Mapped[list["Transaction"]] = relationship("Transaction", back_populates="user")
     aliases: Mapped[list["UserItemAlias"]] = relationship("UserItemAlias", back_populates="user")
+    agent_memories: Mapped[list["UserAgentMemory"]] = relationship("UserAgentMemory", back_populates="user", cascade="all, delete-orphan")
     family_group: Mapped[Optional["FamilyGroup"]] = relationship("FamilyGroup", back_populates="members", foreign_keys=[family_group_id])
     owned_families: Mapped[list["FamilyGroup"]] = relationship("FamilyGroup", back_populates="owner", foreign_keys="[FamilyGroup.owner_id]")

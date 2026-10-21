@@ -116,7 +116,7 @@ async def handle_tx_toggle(callback: CallbackQuery, session: AsyncSession):
     feedback = UserClassificationFeedback(
         user_id=tx.user_id,
         transaction_id=tx.id,
-        original_text=tx.raw_text or tx.item_name,
+        original_text=None,
         original_type=old_type.value,
         corrected_type=new_type.value,
         original_category_id=old_cat_id,

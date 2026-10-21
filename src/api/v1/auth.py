@@ -60,3 +60,32 @@ async def get_me(
         "family_group_id": str(current_user.family_group_id) if current_user.family_group_id else None
     }
 
+
+from sqlalchemy import select
+from src.models.family import FamilyGroup
+
+@router.delete("/me", status_code=status.HTTP_200_OK)
+async def delete_my_account(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    """
+    Permanently erases user account and all personal/financial data via ON DELETE CASCADE.
+    If user owns a family group, group is dissociated or transferred.
+    """
+    if current_user.family_group_id:
+        family = await session.get(FamilyGroup, current_user.family_group_id)
+        if family and family.owner_id == current_user.id:
+            other_member = await session.scalar(
+                select(User).where(User.family_group_id == family.id, User.id != current_user.id)
+            )
+            if other_member:
+                family.owner_id = other_member.id
+            else:
+                await session.delete(family)
+
+    await session.delete(current_user)
+    await session.commit()
+    return {"status": "ok", "message": "Все данные профиля безвозвратно удалены."}
+
+

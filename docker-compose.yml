@@ -1,50 +1,23 @@
 services:
-  caddy:
-    image: caddy:2-alpine
-    container_name: smart_bujet_caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "8443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - backend
-    networks:
-      - smart_bujet_net
-    deploy:
-      resources:
-        limits:
-          cpus: '0.20'
-          memory: 64M
-
-  backend:
-    build: .
+  backend_dev:
     image: smart-bujet-backend:latest
-    container_name: smart_bujet_backend
+    container_name: smart_bujet_backend_dev
     restart: unless-stopped
     env_file: .env
+    environment:
+      PYTHONUNBUFFERED: "1"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./src:/app/src
     expose:
       - "8000"
-    networks:
-      - smart_bujet_net
+    ports:
+      - "127.0.0.1:8001:8000"
     deploy:
       resources:
         limits:
-          cpus: '0.40'
-          memory: 240M
-
-networks:
-  smart_bujet_net:
-    driver: bridge
-
-volumes:
-  caddy_data:
-  caddy_config:
-
+          cpus: '0.20'
+          memory: 150M
+        reservations:
+          memory: 64M

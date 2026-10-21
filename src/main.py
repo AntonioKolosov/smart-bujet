@@ -77,6 +77,7 @@ async def lifespan(app: FastAPI):
                 BotCommand(command="deposits", description="Депозиты и сбережения"),
                 BotCommand(command="credits", description="Кредиты и займы"),
                 BotCommand(command="analytics", description="Аналитика и графики"),
+                BotCommand(command="facts", description="🧠 Персонализация и память агента"),
                 BotCommand(command="family", description="Семейный бюджет"),
                 BotCommand(command="start", description="Перезапустить бота"),
             ])
@@ -89,10 +90,19 @@ async def lifespan(app: FastAPI):
     report_task = asyncio.create_task(report_scheduler_background_loop(async_session_maker, bot))
 
     polling_task = None
-    if is_real_token and settings.domain and settings.domain != "localhost" and ":" not in settings.domain:
-        await bot.set_webhook(url=settings.webhook_url, secret_token=settings.webhook_secret)
+    is_valid_domain = bool(
+        settings.domain
+        and settings.domain.strip()
+        and settings.domain.lower() not in ("localhost", "127.0.0.1", "none")
+    )
+    if is_real_token and is_valid_domain:
+        await bot.set_webhook(
+            url=settings.webhook_url,
+            secret_token=settings.webhook_secret,
+            drop_pending_updates=False
+        )
     elif is_real_token:
-        await bot.delete_webhook(drop_pending_updates=True)
+        await bot.delete_webhook(drop_pending_updates=False)
         polling_task = asyncio.create_task(dp.start_polling(bot))
 
     yield

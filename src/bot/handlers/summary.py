@@ -14,6 +14,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user import User
+from src.models.agent_memory import UserAgentMemory
 from src.services.report_service import ReportService
 from src.services.ai_service import AIService
 from src.services.transaction_service import TransactionService
@@ -198,12 +199,19 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
             await callback.answer(text="Вы не состоите в семейной группе", show_alert=True)
             return
 
+        mem_stmt = (
+            select(UserAgentMemory)
+            .where(UserAgentMemory.user_id == user.id, UserAgentMemory.is_active == True)
+            .order_by(UserAgentMemory.created_at.desc())
+        )
+        user_facts = (await session.scalars(mem_stmt)).all()
+
         summary = await report_service.get_agent_analytics(
             user_id=user.id,
             family_group_id=user.family_group_id,
             period="month"
         )
-        advice = await ai_service.generate_financial_advice(summary)
+        advice = await ai_service.generate_financial_advice(summary, facts=user_facts)
         text = format_summary_card(summary, advice, period_label="на текущую дату")
         kb = summary_card_inline_keyboard(active_scope="f")
 
@@ -219,12 +227,19 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
         return
 
     # Scope: Personal
+    mem_stmt = (
+        select(UserAgentMemory)
+        .where(UserAgentMemory.user_id == user.id, UserAgentMemory.is_active == True)
+        .order_by(UserAgentMemory.created_at.desc())
+    )
+    user_facts = (await session.scalars(mem_stmt)).all()
+
     summary = await report_service.get_agent_analytics(
         user_id=user.id,
         family_group_id=None,
         period="month"
     )
-    advice = await ai_service.generate_financial_advice(summary)
+    advice = await ai_service.generate_financial_advice(summary, facts=user_facts)
     text = format_summary_card(summary, advice, period_label="на текущую дату")
     has_fam = await user_has_active_family(session, user)
     kb = summary_card_inline_keyboard(active_scope="p", has_family=has_fam)

@@ -1,3 +1,4 @@
+from src.models.agent_memory import FactCategory, UserAgentMemory
 from src.models.alias import UserItemAlias
 from src.models.asset import AssetAccount, AssetType
 from src.models.base import Base
@@ -17,11 +18,13 @@ __all__ = [
     "CategoryType",
     "CreditAccount",
     "DynamicFewShot",
+    "FactCategory",
     "FamilyGroup",
     "ScheduledReportLog",
     "Transaction",
     "TransactionSource",
     "User",
+    "UserAgentMemory",
     "UserClassificationFeedback",
     "UserItemAlias",
 ]

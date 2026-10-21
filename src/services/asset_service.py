@@ -198,7 +198,7 @@ class AssetService:
         note: str | None = None
     ) -> AssetAccount:
         """Transfer funds from main balance into asset account."""
-        account = await self.session.get(AssetAccount, asset_id)
+        account = await self.session.get(AssetAccount, asset_id, with_for_update=True)
         if not account or account.user_id != user_id:
             raise ValueError("Asset account not found")
 
@@ -240,7 +240,7 @@ class AssetService:
             exchange_rate=ex_rate,
             type=CategoryType.transfer_out,
             item_name=item_title,
-            raw_text=note,
+            raw_text=None,
             source=TransactionSource.manual
         )
         self.session.add(tx)
@@ -257,7 +257,7 @@ class AssetService:
         note: str | None = None
     ) -> AssetAccount:
         """Withdraw funds from asset into main liquid balance."""
-        account = await self.session.get(AssetAccount, asset_id)
+        account = await self.session.get(AssetAccount, asset_id, with_for_update=True)
         if not account or account.user_id != user_id:
             raise ValueError("Asset account not found")
 
@@ -299,7 +299,7 @@ class AssetService:
             exchange_rate=ex_rate,
             type=CategoryType.transfer_in,
             item_name=item_title,
-            raw_text=note,
+            raw_text=None,
             source=TransactionSource.manual
         )
         self.session.add(tx)

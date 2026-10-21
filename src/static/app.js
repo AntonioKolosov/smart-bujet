@@ -93,10 +93,32 @@
   const navAssetsBtn = document.getElementById('navAssetsBtn');
   const navCreditsBtn = document.getElementById('navCreditsBtn');
   const navAnalyticsBtn = document.getElementById('navAnalyticsBtn');
+  const navFactsBtn = document.getElementById('navFactsBtn');
   const tabOps = document.getElementById('tab-operations');
   const tabAssets = document.getElementById('tab-assets');
   const tabCredits = document.getElementById('tab-credits');
   const tabAnalytics = document.getElementById('tab-analytics');
+  const tabFacts = document.getElementById('tab-facts');
+
+  // Personalization / Facts Elements
+  const addFactBtn = document.getElementById('addFactBtn');
+  const factsLoaderEl = document.getElementById('factsLoader');
+  const factsErrorEl = document.getElementById('factsError');
+  const factsEmptyStateEl = document.getElementById('factsEmptyState');
+  const factsListEl = document.getElementById('factsList');
+
+  const factModal = document.getElementById('factModal');
+  const closeFactModalBtn = document.getElementById('closeFactModalBtn');
+  const cancelFactBtn = document.getElementById('cancelFactBtn');
+  const factForm = document.getElementById('factForm');
+  const factModalTitle = document.getElementById('factModalTitle');
+  const factModalError = document.getElementById('factModalError');
+  const factIdInput = document.getElementById('factIdInput');
+  const factTextInput = document.getElementById('factTextInput');
+  const factCategorySelect = document.getElementById('factCategorySelect');
+  const saveFactBtn = document.getElementById('saveFactBtn');
+  const deleteFactRow = document.getElementById('deleteFactRow');
+  const deleteFactBtn = document.getElementById('deleteFactBtn');
 
   // Operations Mode Switcher Elements
   const btnOpsPersonal = document.getElementById('btnOpsPersonal');
@@ -302,10 +324,14 @@
 
   // --- Tab Navigation & Mode Switchers ---
   function switchTab(tabId) {
-    [tabOps, tabAssets, tabCredits, tabAnalytics].forEach(t => t && t.classList.remove('active'));
-    [navOpsBtn, navAssetsBtn, navCreditsBtn, navAnalyticsBtn].forEach(b => b && b.classList.remove('active'));
+    [tabOps, tabAssets, tabCredits, tabAnalytics, tabFacts].forEach(t => t && t.classList.remove('active'));
+    [navOpsBtn, navAssetsBtn, navCreditsBtn, navAnalyticsBtn, navFactsBtn].forEach(b => b && b.classList.remove('active'));
 
-    if (tabId === 'tab-analytics') {
+    if (tabId === 'tab-facts') {
+      if (tabFacts) tabFacts.classList.add('active');
+      if (navFactsBtn) navFactsBtn.classList.add('active');
+      fetchFacts();
+    } else if (tabId === 'tab-analytics') {
       if (tabAnalytics) tabAnalytics.classList.add('active');
       if (navAnalyticsBtn) navAnalyticsBtn.classList.add('active');
       fetchAnalytics(currentAnalyticsMode === 'family');
@@ -367,6 +393,7 @@
   if (navAssetsBtn) navAssetsBtn.addEventListener('click', () => switchTab('tab-assets'));
   if (navCreditsBtn) navCreditsBtn.addEventListener('click', () => switchTab('tab-credits'));
   if (navAnalyticsBtn) navAnalyticsBtn.addEventListener('click', () => switchTab('tab-analytics'));
+  if (navFactsBtn) navFactsBtn.addEventListener('click', () => switchTab('tab-facts'));
 
   // --- Data Fetching ---
   async function fetchProfile() {
@@ -2031,9 +2058,253 @@
     if (tabAnalytics && tabAnalytics.classList.contains('active')) {
       fetchAnalytics(currentAnalyticsMode === 'family');
     }
+    if (tabFacts && tabFacts.classList.contains('active')) {
+      fetchFacts();
+    }
   });
 
-  // Check URL params for deep linking (e.g. ?page=deposits, ?page=family, ?page=credits, ?page=analytics)
+  // --- Personalization / Facts Domain ---
+  async function fetchFacts() {
+    if (!tabFacts) return;
+    factsLoaderEl?.classList.remove('hidden');
+    factsErrorEl?.classList.add('hidden');
+    factsEmptyStateEl?.classList.add('hidden');
+    if (factsListEl) factsListEl.innerHTML = '';
+
+    try {
+      const res = await fetch('/api/v1/facts/', { headers: getHeaders() });
+      if (!res.ok) {
+        throw new Error('Не удалось загрузить факты');
+      }
+      const data = await res.json();
+      renderFacts(data);
+    } catch (err) {
+      if (factsErrorEl) {
+        factsErrorEl.textContent = err.message || 'Ошибка загрузки фактов';
+        factsErrorEl.classList.remove('hidden');
+      }
+    } finally {
+      factsLoaderEl?.classList.add('hidden');
+    }
+  }
+
+  function renderFacts(facts) {
+    if (!factsListEl) return;
+    factsListEl.innerHTML = '';
+
+    if (!facts || facts.length === 0) {
+      factsEmptyStateEl?.classList.remove('hidden');
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    facts.forEach(f => {
+      const card = document.createElement('div');
+      card.className = 'fact-card';
+
+      const body = document.createElement('div');
+      body.className = 'fact-card-body';
+
+      const badge = document.createElement('span');
+      badge.className = `fact-category-badge ${f.category}`;
+      badge.textContent = f.category_badge || f.category_label || f.category;
+      body.appendChild(badge);
+
+      const text = document.createElement('div');
+      text.className = 'fact-text';
+      text.textContent = f.fact_text;
+      body.appendChild(text);
+
+      const actions = document.createElement('div');
+      actions.className = 'fact-card-actions';
+
+      // Edit button
+      const editBtn = document.createElement('button');
+      editBtn.className = 'fact-action-btn';
+      editBtn.title = 'Редактировать';
+      editBtn.setAttribute('aria-label', 'Редактировать факт');
+      editBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+        </svg>
+      `;
+      editBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openFactModal(f);
+      });
+
+      // Delete button
+      const delBtn = document.createElement('button');
+      delBtn.className = 'fact-action-btn delete';
+      delBtn.title = 'Удалить';
+      delBtn.setAttribute('aria-label', 'Удалить факт');
+      delBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"></polyline>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          <line x1="10" y1="11" x2="10" y2="17"></line>
+          <line x1="14" y1="11" x2="14" y2="17"></line>
+        </svg>
+      `;
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteFactDirect(f);
+      });
+
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+
+      card.appendChild(body);
+      card.appendChild(actions);
+      fragment.appendChild(card);
+    });
+
+    factsListEl.appendChild(fragment);
+  }
+
+  function openFactModal(fact = null) {
+    if (!factModal) return;
+    if (factModalError) {
+      factModalError.classList.add('hidden');
+      factModalError.textContent = '';
+    }
+
+    if (fact) {
+      if (factModalTitle) factModalTitle.textContent = 'Редактировать факт';
+      if (factIdInput) factIdInput.value = fact.id;
+      if (factTextInput) factTextInput.value = fact.fact_text || '';
+      if (factCategorySelect) factCategorySelect.value = fact.category || '';
+      deleteFactRow?.classList.remove('hidden');
+    } else {
+      if (factModalTitle) factModalTitle.textContent = 'Новый факт о себе';
+      if (factIdInput) factIdInput.value = '';
+      if (factTextInput) factTextInput.value = '';
+      if (factCategorySelect) factCategorySelect.value = '';
+      deleteFactRow?.classList.add('hidden');
+    }
+
+    factModal.classList.remove('hidden');
+    setTimeout(() => factTextInput?.focus(), 80);
+  }
+
+  function closeFactModal() {
+    if (!factModal) return;
+    factModal.classList.add('hidden');
+    factForm?.reset();
+  }
+
+  async function deleteFactDirect(fact) {
+    if (!confirm(`Удалить этот факт: «${fact.fact_text}»?`)) return;
+    try {
+      const res = await fetch(`/api/v1/facts/${fact.id}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+      });
+      if (!res.ok) {
+        throw new Error('Не удалось удалить факт');
+      }
+      if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+      await fetchFacts();
+    } catch (err) {
+      alert(err.message || 'Ошибка при удалении факта');
+    }
+  }
+
+  if (addFactBtn) addFactBtn.addEventListener('click', () => openFactModal(null));
+  if (closeFactModalBtn) closeFactModalBtn.addEventListener('click', closeFactModal);
+  if (cancelFactBtn) cancelFactBtn.addEventListener('click', closeFactModal);
+  if (factModal) {
+    factModal.addEventListener('click', (e) => {
+      if (e.target === factModal) closeFactModal();
+    });
+  }
+
+  if (factForm) {
+    factForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = factTextInput?.value?.trim();
+      if (!text) {
+        if (factModalError) {
+          factModalError.textContent = 'Введите текст факта';
+          factModalError.classList.remove('hidden');
+        }
+        return;
+      }
+
+      const factId = factIdInput?.value;
+      const category = factCategorySelect?.value || null;
+      const isEdit = Boolean(factId);
+
+      if (saveFactBtn) {
+        saveFactBtn.disabled = true;
+        saveFactBtn.textContent = 'Сохранение...';
+      }
+      if (factModalError) factModalError.classList.add('hidden');
+
+      try {
+        const url = isEdit ? `/api/v1/facts/${factId}` : '/api/v1/facts/';
+        const method = isEdit ? 'PATCH' : 'POST';
+        const bodyPayload = isEdit ? { fact_text: text, category } : { fact_text: text, category };
+
+        const res = await fetch(url, {
+          method,
+          headers: getHeaders(),
+          body: JSON.stringify(bodyPayload)
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || 'Не удалось сохранить факт');
+        }
+
+        if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+        closeFactModal();
+        await fetchFacts();
+      } catch (err) {
+        if (factModalError) {
+          factModalError.textContent = err.message || 'Ошибка сохранения факта';
+          factModalError.classList.remove('hidden');
+        }
+      } finally {
+        if (saveFactBtn) {
+          saveFactBtn.disabled = false;
+          saveFactBtn.textContent = 'Сохранить';
+        }
+      }
+    });
+  }
+
+  if (deleteFactBtn) {
+    deleteFactBtn.addEventListener('click', async () => {
+      const factId = factIdInput?.value;
+      if (!factId) return;
+      if (!confirm('Вы уверены, что хотите удалить этот факт?')) return;
+
+      try {
+        deleteFactBtn.disabled = true;
+        const res = await fetch(`/api/v1/facts/${factId}`, {
+          method: 'DELETE',
+          headers: getHeaders()
+        });
+        if (!res.ok) throw new Error('Не удалось удалить факт');
+
+        if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+        closeFactModal();
+        await fetchFacts();
+      } catch (err) {
+        if (factModalError) {
+          factModalError.textContent = err.message || 'Ошибка удаления факта';
+          factModalError.classList.remove('hidden');
+        }
+      } finally {
+        deleteFactBtn.disabled = false;
+      }
+    });
+  }
+
+  // Check URL params for deep linking (e.g. ?page=deposits, ?page=family, ?page=credits, ?page=analytics, ?page=facts)
   const urlParams = new URLSearchParams(window.location.search);
   const initialPage = (urlParams.get('page') || window.location.hash.replace('#', '') || '').toLowerCase();
 
@@ -2046,6 +2317,8 @@
     switchOpsMode('family');
   } else if (initialPage === 'analytics' || initialPage === 'stats') {
     switchTab('tab-analytics');
+  } else if (initialPage === 'facts' || initialPage === 'personalization' || initialPage === 'profile') {
+    switchTab('tab-facts');
   } else {
     switchTab('tab-operations');
   }

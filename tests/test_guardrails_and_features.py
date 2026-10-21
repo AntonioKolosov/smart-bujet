@@ -180,7 +180,7 @@ class TestAssetLiquidationAndFX(unittest.IsolatedAsyncioTestCase):
             is_active=True
         )
 
-        session.get = AsyncMock(side_effect=lambda model, mid: asset if model == AssetAccount else user)
+        session.get = AsyncMock(side_effect=lambda model, mid, *args, **kwargs: asset if model == AssetAccount else user)
         service.category_service.get_categories = AsyncMock(return_value=[Category(id=2, name="Депозит и вклады", type=CategoryType.transfer_out)])
 
         added_objects = []
