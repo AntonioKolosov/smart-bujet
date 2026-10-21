@@ -94,3 +94,276 @@
    - Исправить формулу валютного пересчета (`/` вместо `*`) в `src/services/transaction_service.py:1144` и добавить `.with_for_update()` в `AssetService`.
    - Добавить `ON DELETE CASCADE`, кнопку полного удаления аккаунта (`/delete_account`) и экран согласия с Политикой конфиденциальности при `/start`.
    - Настроить ежедневный зашифрованный `pg_dump` (через `age`/`gpg`).
+
+
+---
+
+# Повторный аудит (Re-Audit после коммита `f1788dc`)
+
+Дата проверки: `2026-10-21`
+Проверенный коммит: `f1788dc` (*"feat: user personalization facts CRUD and Argon security audit remediations"*)
+Проверены: код `C:\Users\aanto\smart-bujet`, `C:\Users\aanto\smart-bujet-dev`, а также живой сервер `85.198.89.188` (контейнеры `smart_bujet_backend`, `smart_bujet_backend_dev`, `postgres_dg_improve`, `hashicorp_vault` и база `smart_bujet`).
+
+---
+
+## 1. Что реально исправлено и работает на проде ✅
+
+1. **Очистка `raw_text` (текстовые, ручные, чековые транзакции) и `original_text` в коде и БД:**
+   - В `TransactionService.process_text` (`src/services/transaction_service.py:555`), `_handle_intra_family_mirror` (`:169`), `_build_transactions_from_receipt_payload` (`:844`), `create_manual_transaction` (`:1430`), а также в `AssetService.deposit_to_asset` (`src/services/asset_service.py:243`) и `withdraw_from_asset` (`:302`) установлено `raw_text=None`.
+   - В `handle_confirm_cat` (`src/bot/handlers/tx_actions.py:119`) при сохранении `UserClassificationFeedback` установлено `original_text=None`.
+   - В живой БД `smart_bujet` старые значения очищены (`SELECT count(raw_text) FROM transactions` = `0` из `195`; `SELECT count(original_text) FROM user_classification_feedback` = `0` из `2`).
+2. **Передача `known_names` в `PIIGuardrailService` при классификации текста:**
+   - В `TransactionService.process_text` (`src/services/transaction_service.py:401-424`) собираются `first_name` пользователя и членов его семьи и передаются в `self.ai_service.classify_text(..., known_names=known_names)`.
+3. **Исправлена формула валютного пересчёта при редактировании транзакции:**
+   - В `TransactionService.update_transaction` (`src/services/transaction_service.py:1159-1160`) умножение `new_amount * Decimal(str(tx.exchange_rate))` заменено на деление `new_amount / Decimal(str(tx.exchange_rate))` с проверкой `> 0`.
+4. **Добавлены пессимистичные блокировки (`SELECT ... FOR UPDATE`):**
+   - В `AssetService._get_asset_with_access` (`src/services/asset_service.py:97-108`) добавлен параметр `with_for_update=True` (используется в `deposit_to_asset:201` и `withdraw_from_asset:260`).
+   - В `TransactionService.update_transaction` (`src/services/transaction_service.py:1156-1175`) добавлен `.with_for_update()` при чтении `Transaction` и `CreditAccount`.
+5. **Убрано ограничение `":" not in settings.domain`, `drop_pending_updates=False` и добавлена дедупликация `update_id`:**
+   - В `src/main.py:93-105` снята блокировка на двоеточие в домене (`:8443`), выставлен `drop_pending_updates=False`.
+   - В `src/api/v1/webhook.py:14-49` добавлен in-memory фильтр дублей `is_duplicate_update` с TTL 300 секунд.
+6. **Добавлена фича «Память агента» (`user_agent_memories`):**
+   - Создана модель `UserAgentMemory` (`src/models/agent_memory.py:15-34`), таблица в БД, CRUD API `/api/v1/facts/` (`src/api/v1/facts.py:1-154`), вкладка «🧠 Память» в MiniApp (`src/static/index.html:99-102`, `src/static/app.js:1682-1766`) и передача фактов в `AIService.generate_financial_advice` (`src/services/ai_service.py:418-438`) при ручном запросе отчёта из бота (`src/bot/handlers/summary.py:203-242`).
+
+---
+
+## 2. Что агент сделал с критическими ошибками или оставил «мёртвым кодом» ⚠️
+
+### 2.1. [CRITICAL BUG] Удаление аккаунта `DELETE /api/v1/auth/me` гарантированно падает с `500 IntegrityError`
+* **Что сделал агент:** В `src/api/v1/auth.py:67-90` добавил эндпоинт `delete_my_account`, написал в комментарии *"Permanently erases user account and all personal/financial data via ON DELETE CASCADE"* и вызвал `await db.delete(user)`.
+* **Почему это не работает:**
+  1. Ни в моделях SQLAlchemy (`src/models/transaction.py:34`, `src/models/credit.py:23`, `src/models/alias.py:19`, `src/models/category.py:27`), ни в самой базе PostgreSQL на внешних ключах `transactions_user_id_fkey`, `credit_accounts_user_id_fkey`, `user_item_aliases_user_id_fkey`, `categories_user_id_fkey` **НЕТ `ON DELETE CASCADE`**.
+  2. Любая попытка удалить реального пользователя, у которого есть хотя бы одна транзакция, кредит, алиас или своя категория, приводит к `ForeignKeyViolationError` (`500 Internal Server Error`).
+  3. Кроме того, если удаляемый пользователь является владельцем семьи (`family_groups.owner_id`), удаление упадёт или сломает семью партнёра.
+  4. Ни в MiniApp (`src/static/index.html`, `src/static/app.js`), ни в Telegram-боте **нет кнопки или команды `/delete_account`**, через которую пользователь вообще мог бы вызвать этот эндпоинт.
+
+### 2.2. [DEAD CODE / БУТАФОРИЯ] `AIRateLimiter` написан, но НИГДЕ не вызывается
+* **Что сделал агент:** В конец `src/services/ai_service.py:622-647` добавил класс `AIRateLimiter` и синглтон `ai_rate_limiter = AIRateLimiter()`, а также написал unit-тест `test_personalization_and_argon_security.py:49-65`, который тестирует сам класс изолированно.
+* **Почему это не работает:** Метод `ai_rate_limiter.check_and_record()` **не вызывается ни в одном методе `AIService` (`classify_text`, `parse_voice`, `parse_receipt_media`, `generate_financial_advice`, `classify_user_fact`), ни в хэндлерах бота, ни в API роутерах** (0 вызовов во всём `src/`). В продакшене защита квот Gemini и Whisper полностью отсутствует.
+
+### 2.3. [DEAD BOT COMMAND] Команда `/facts` висит в меню бота, но не имеет обработчика
+* **Что сделал агент:** В `src/main.py:80` добавил `BotCommand(command="facts", description="🧠 Персонализация и память агента")`.
+* **Почему это не работает:** В `src/bot/handlers/` **нет хэндлера `Command("facts")`**. Когда пользователь нажимает `/facts` в меню Telegram-бота, сообщение перехватывается общим текстовым хэндлером трат (`text_tx.py`) и отправляется в парсер покупок как текст траты!
+
+### 2.4. [NEW INFRA BUG] Конфликт пула соединений SQLAlchemy (`max 60`) с лимитом PostgreSQL (`max_connections = 25`)
+* **Что сделал агент:** В `src/core/database.py:8-16` выставил `pool_size=10, max_overflow=20` (до **30 соединений** на один процесс бэкенда).
+* **Почему это опасно:** На сервере одновременно запущены два контейнера (`smart_bujet_backend` и `smart_bujet_backend_dev`), что в пике даёт до **60 соединений**, плюс другие сервисы на том же контейнере `postgres_dg_improve`. При этом в `/home/ag_admin/postgres/postgresql.conf` на сервере лимит **`max_connections` остался равен `25`**! Под нагрузкой база начнёт отбрасывать коннекты с `TooManyConnectionsError`.
+
+### 2.5. Пропуски в очистке `raw_text`, именах семей и «Памяти агента»
+1. **Голосовые сообщения всё ещё сохраняют `raw_text` в БД:** В `TransactionService.process_voice` (`src/services/transaction_service.py:748`) агент забыл заменить `raw_text=last_raw_text` на `raw_text=None`.
+2. **В боевой БД осталось старое название семьи с именем:** В коде `src/services/family_service.py:34` дефолт для новых семей изменён на `"Семейный бюджет"`, но в боевой таблице `family_groups` существующая строка по-прежнему хранит `Семья Anton`.
+3. **Автоматические отчёты по расписанию игнорируют память агента:** В `src/core/report_scheduler.py:116` вызов `await ai_service.generate_financial_advice(summary)` выполняется **без передачи `facts=...`**.
+4. **Факты из памяти агента (`fact_text`) уходят в Gemini без `PIIGuardrailService`:** Ни в `AIService.classify_user_fact` (`src/services/ai_service.py:559-605`), ни в `AIService.generate_financial_advice` (`src/services/ai_service.py:421-437`) текст фактов не маскируется через `PIIGuardrailService.mask_text`.
+
+---
+
+## 3. Что агент упустил полностью (0% выполнения из `argon-audit.md`) ❌
+
+1. **[P0] Сетевая безопасность сервера (`85.198.89.188`) не тронута вообще:**
+   - Межсетевой экран `ufw` по-прежнему **выключен** (`Status: inactive`, `iptables INPUT ACCEPT`).
+   - Порт PostgreSQL (`postgres_dg_improve`) **`0.0.0.0:5432`** открыт всему интернету без SSL (`ssl = off`).
+   - В `/home/ag_admin/postgres/pg_hba.conf` по-прежнему стоят опасные правила `local all all trust` и `host all all 127.0.0.1/32 trust` (любой локальный процесс заходит суперпользователем без пароля).
+   - Порт HashiCorp Vault (`hashicorp_vault`) **`0.0.0.0:8200`** открыт всему интернету без TLS.
+2. **[P0] «Слепота администратора» (Admin Blindness — шифрование и обезличивание БД) не реализована вообще:**
+   - Ни одного поля с шифрованием (`AES-256-GCM`) и ни одного слепого индекса (`HMAC-SHA256`) не добавлено.
+   - В таблице `users` в открытом виде лежат Telegram ID, `username` (`heretic_ded`, `akadyrova`) и `first_name` (`Anton`, `Aiganym`).
+   - В открытом виде (`plaintext`) лежат: `transactions.item_name`, `asset_accounts.name` (*«Страховка Айкоша и Тоша»*, *«Страховка Дочка»*, *«Доула»*, *«Роды»*, *«Наличные»*), `credit_accounts.name`, `credit_accounts.bank_name`.
+   - Новая таблица `user_agent_memories.fact_text` также создана **в открытом виде (`Text`)** — теперь там в plaintext лежат ещё и личные факты о зарплате, здоровье и семье!
+   - Таблица `user_item_aliases.item_name_normalized` (144 строки) по-прежнему хранит открытые названия покупок вместо `HMAC-SHA256`.
+3. **[P1] Автоматические зашифрованные бэкапы не настроены:**
+   - В `crontab` и `systemd` на сервере нет задач резервного копирования. В `/home/ag_admin/backups/` лежат только 2 ручных незашифрованных `.sql.gz` файла.
+4. **[P1] Юридическое согласие (152-ФЗ / ЗРК о ПДн) и защита `/api/v1/family/join`:**
+   - При `/start` нет экрана принятия Политики конфиденциальности (согласия на обработку данных и передачу в Gemini).
+   - На `POST /api/v1/family/join` нет защиты от перебора `invite_code` (Rate Limit).
+5. **[P2] Бот на проде всё ещё работает в режиме Polling, а локальный `smart-bujet-dev` не синхронизирован:**
+   - В `/home/ag_admin/smart-bujet/.env` на сервере оставлен `WEBHOOK_DOMAIN=localhost`.
+   - Локальная папка `C:\Users\aanto\smart-bujet-dev` осталась на старом коммите `1cdfad8` (тогда как на сервере `/home/ag_admin/smart-bujet-dev` на `f1788dc`).
+
+---
+
+## 4. Чёткое ТЗ для агента: что ОБЯЗАТЕЛЬНО нужно сделать (Definition of Done)
+
+Ниже приведён исчерпывающий список задач. **Запрещается создавать классы-заглушки, которые не вызываются в боевом коде, или писать комментарии про `CASCADE` без реальной миграции БД.**
+
+### Блок 1. Сервер, Сеть и СУБД (`85.198.89.188`) — Сделать в первую очередь!
+1. **Закрыть порты Postgres и Vault на `127.0.0.1`:**
+   - В compose-конфигурации контейнеров `postgres_dg_improve` и `hashicorp_vault` на сервере изменить проброс портов с `0.0.0.0:5432:5432` на `127.0.0.1:5432:5432` и с `0.0.0.0:8200:8200` на `127.0.0.1:8200:8200`. Перезапустить эти контейнеры и проверить через `ss -tulpn`, что на `0.0.0.0:5432` и `0.0.0.0:8200` больше никто не слушает. *(Контейнер `mtproto-proxy` на порту `443` НЕ ТРОГАТЬ!).*
+2. **Включить межсетевой экран `ufw`:**
+   - Разрешить входящие соединения **только** на `22/tcp` (SSH), `80/tcp` (HTTP Caddy), `443/tcp` (MTProto Proxy), `8443/tcp` (HTTPS Caddy MiniApp/Webhook). Включить `ufw enable` и проверить `ufw status verbose`.
+3. **Исправить `pg_hba.conf` и `postgresql.conf` в `/home/ag_admin/postgres/`:**
+   - В `pg_hba.conf` заменить `trust` на `scram-sha-256` для `local` и `127.0.0.1/32` (и запретить подключения с `0.0.0.0/0`, оставив только внутреннюю подсеть Docker `172.16.0.0/12` с `scram-sha-256`).
+   - В `postgresql.conf` увеличить `max_connections = 100` (сейчас `25`, что конфликтует с пулом SQLAlchemy). Перезагрузить конфигурацию Postgres (`SELECT pg_reload_conf();` или рестарт контейнера для `max_connections`).
+4. **Настроить ежедневный зашифрованный бэкап БД:**
+   - Сгенерировать пару ключей `age` (`age-keygen`) или `gpg` (приватный ключ отдать владельцу / не хранить рядом с бэкапами, на сервере оставить только публичный ключ получателя).
+   - Добавить скрипт `/home/ag_admin/scripts/backup_smart_bujet.sh` и задачу в `crontab` (`0 3 * * *`), которая делает `docker exec postgres_dg_improve pg_dump -U bujet_user -Fc smart_bujet | age -r <PUBLIC_KEY> > /home/ag_admin/backups/smart_bujet_$(date +\%F).dump.age` и удаляет архивы старше 14 дней. Удалить старые незашифрованные `.sql.gz` дампы из `/home/ag_admin/backups/`.
+
+### Блок 2. «Слепота администратора» (Шифрование БД и обезличивание PII)
+1. **Внедрить прозрачное шифрование чувствительных текстовых колонок (`AES-256-GCM`):**
+   - Реализовать SQLAlchemy `TypeDecorator` `EncryptedString` (на базе `cryptography.hazmat.primitives.ciphers.aead.AESGCM` с префиксом версии `enc:v1:<base64(nonce + ciphertext)>`, чтобы отличать зашифрованные строки от старых при миграции).
+   - Ключ шифрования (`DATA_ENCRYPTION_KEY`) должен загружаться из `.env` / HashiCorp Vault (не хардкодить дефолтный ключ в коде!).
+   - Применить `EncryptedString` к следующим колонкам моделей:
+     - `Transaction.item_name` (`src/models/transaction.py`)
+     - `AssetAccount.name` (`src/models/asset.py`)
+     - `CreditAccount.name`, `CreditAccount.bank_name` (`src/models/credit.py`)
+     - `UserAgentMemory.fact_text` (`src/models/agent_memory.py`)
+   - **Написать и выполнить скрипт миграции существующих данных в боевой БД**, который прочитает все текущие открытые строки в `transactions`, `asset_accounts`, `credit_accounts`, `user_agent_memories` и перезапишет их в зашифрованном виде (`enc:v1:...`). Проверить через `psql`, что в таблицах больше нет открытого текста (*«Роды»*, *«Доула»*, *«Halyk»* и т.д.).
+2. **Перевести `user_item_aliases` на слепой индекс (`HMAC-SHA256`):**
+   - В `UserItemAlias` (`src/models/alias.py`) при сохранении и поиске алиаса вычислять `HMAC-SHA256(key=BLIND_INDEX_SECRET, msg=item_name_normalized.encode('utf-8')).hexdigest()` и хранить в `item_name_normalized` только 64-символьный hex-хеш.
+   - Сконвертировать все 144 существующих алиаса в боевой БД в HMAC-хеши.
+3. **Убрать хранение открытых `username`, `first_name` и старого имени семьи:**
+   - В `User` (`src/models/user.py`) зашифровать `first_name` через `EncryptedString`, а `username` перестать сохранять (`username = None`) и очистить в боевой БД (`UPDATE users SET username = NULL;`).
+   - В боевой БД обновить название существующей семьи: `UPDATE family_groups SET name = 'Семейный бюджет';`.
+   - В `TransactionService.process_voice` (`src/services/transaction_service.py:748`) заменить `raw_text=last_raw_text` на `raw_text=None`.
+
+### Блок 3. Исправление сломанных фич из коммита `f1788dc`
+1. **Починить удаление аккаунта (`DELETE /api/v1/auth/me` и `ON DELETE CASCADE`):**
+   - В моделях `Transaction`, `AssetAccount`, `CreditAccount`, `UserItemAlias`, `Category`, `UserClassificationFeedback`, `ScheduledReportLog`, `UserAgentMemory` прописать `ForeignKey("users.id", ondelete="CASCADE")`.
+   - Выполнить в боевой БД `ALTER TABLE ... DROP CONSTRAINT ..._user_id_fkey, ADD CONSTRAINT ..._user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;` для всех таблиц, ссылающихся на `users(id)`.
+   - В `delete_my_account` (`src/api/v1/auth.py:67-90`) перед `await db.delete(user)` обработать случай, когда пользователь состоит в `family_groups` (если он `owner_id` и в семье есть другие участники — передать `owner_id` второму участнику; если он единственный участник — отвязать `user.family_group_id = None` и удалить `FamilyGroup`).
+   - Добавить кнопку **«🗑 Удалить аккаунт и все данные»** с подтверждением в MiniApp (`src/static/index.html`, `src/static/app.js`) и команду `/delete_account` в Telegram-боте.
+   - Написать интеграционный тест, который создаёт пользователя с транзакцией, активом, кредитом, алиасом и семьёй, вызывает `DELETE /api/v1/auth/me` и проверяет, что возвращается `200 OK`, а все записи каскадно удалены.
+2. **Реально подключить `AIRateLimiter` и защиту `/api/v1/family/join`:**
+   - Встроить вызов `ai_rate_limiter.check_and_record(user_id)` внутрь методов `AIService` (`classify_text`, `parse_voice`, `parse_receipt_media`, `generate_financial_advice`, `classify_user_fact`) или на уровне хэндлеров/сервисов с передачей `user_id` и возвратом понятного сообщения пользователю при превышении лимита (например, `HTTPException(429)` в API и вежливое предупреждение в боте).
+   - Добавить Rate Limiter на `POST /api/v1/family/join` (не более 5 неудачных попыток ввода `invite_code` за 10 минут на одного `user_id`).
+3. **Реализовать обработчик команды `/facts` в Telegram-боте:**
+   - Добавить в `src/bot/handlers/` хэндлер `Command("facts")`, который выводит пользователю список сохранённых фактов из `UserAgentMemory` с inline-кнопками удаления каждого факта и кнопкой перехода во вкладку «🧠 Память» в MiniApp (чтобы `/facts` не улетал в парсер трат!).
+4. **Довести до ума интеграцию `UserAgentMemory` (Память агента):**
+   - В `src/core/report_scheduler.py:116` загружать факты пользователя из `UserAgentMemory` и передавать `facts=user_facts` в `ai_service.generate_financial_advice(summary, facts=user_facts)`.
+   - В `AIService.classify_user_fact` (`src/services/ai_service.py:559`) и `AIService.generate_financial_advice` (`:421`) пропускать `fact_text` через `PIIGuardrailService.mask_text(..., known_names=known_names)` перед отправкой в Gemini.
+5. **Добавить экран согласия с Политикой конфиденциальности при `/start`:**
+   - Для новых пользователей при `/start` (до создания активного профиля / выбора валюты) показывать краткое уведомление о правилах хранения данных (зашифрованное хранение, использование облачного ИИ для распознавания чеков/голоса, право на полное удаление через `/delete_account`) с кнопкой `✅ Принимаю условия`.
+6. **Синхронизировать `C:\Users\aanto\smart-bujet-dev`:**
+   - Сделать `git pull` в `C:\Users\aanto\smart-bujet-dev`, чтобы локальная dev-папка не отставала от прод-репозитория.
+
+
+---
+
+# Третий аудит (Re-Audit #3: Prod `b406bc8` + Dev `d819165` — Выписки и Персонализация)
+
+Дата проверки: `2026-10-22`
+Проверенные коммиты:
+- **Prod (`C:\Users\aanto\smart-bujet` и `/home/ag_admin/smart-bujet`):** `b406bc8` (*"chore(prod): isolate Argon security audit fixes, remove experimental personalization, add return to menu button"*)
+- **Dev (`C:\Users\aanto\smart-bujet-dev` и `/home/ag_admin/smart-bujet-dev`):** `d819165` (*"feat(dev): user facts personalization, bank statement PDF ingestion, Argon security audit fixes, return to menu button"*)
+- **Боевой сервер `85.198.89.188`:** контейнеры `smart_bujet_backend`, `smart_bujet_backend_dev`, `postgres_dg_improve` (базы `smart_bujet` и `smart_bujet_dev`), `hashicorp_vault`.
+
+---
+
+## 1. Статус выполнения Блоков 1, 2, 3 из предыдущего аудита — ❌ 0% ИСПРАВЛЕНИЙ
+
+Разработчик разделил ветки (вынес персонализацию из Prod в Dev и синхронизировал локальный `smart-bujet-dev`), **но НЕ выполнил ни одного пункта из Блоков 1, 2 и 3 `argon-audit.md`**:
+
+1. **Блок 1 (Сервер, Сеть, Postgres, Бэкапы) — НЕ ВЫПОЛНЕНО:**
+   - Порты `0.0.0.0:5432` (`postgres_dg_improve`, `ssl = off`) и `0.0.0.0:8200` (`hashicorp_vault`) по-прежнему открыты всему интернету.
+   - `ufw status` по-прежнему `inactive`.
+   - В `pg_hba.conf` сохраняются правила `local all all trust`, `host all all 127.0.0.1/32 trust` и `host all all 0.0.0.0/0 scram-sha-256`.
+   - В `/home/ag_admin/postgres/postgresql.conf` лимит `max_connections = 25` не увеличен, хотя два запущенных контейнера (`smart_bujet_backend` + `smart_bujet_backend_dev`) имеют пул `10 + 20 = 30` соединений каждый (**60 соединений суммарно при лимите 25**).
+   - `crontab -l` пуст, ключи `age`/`gpg` не созданы, в `/home/ag_admin/backups/` лежат 3 ручных незашифрованных `.sql.gz` дампа.
+2. **Блок 2 (Шифрование `AES-256-GCM` и `HMAC-SHA256` Blind Index) — НЕ ВЫПОЛНЕНО:**
+   - Ни в `smart-bujet`, ни в `smart-bujet-dev` нет `EncryptedString` (`AES-256-GCM`) и нет `HMAC-SHA256` для алиасов.
+   - В обеих базах (`smart_bujet` и `smart_bujet_dev`) все поля `users` (`username`, `first_name`), `transactions.item_name`, `asset_accounts.name` (*«Роды»*, *«Доула»*, *«Страховка Дочка»*), `credit_accounts`, `user_item_aliases` (144 строки) и `user_agent_memories.fact_text` лежат в **100% открытом тексте (`plaintext`)**.
+   - В БД `smart_bujet` (Prod) запись `family_groups.name` по-прежнему называется `Семья Anton`, а таблица `user_agent_memories` осталась в прод-базе после отката кода.
+   - В `TransactionService.process_voice` (`src/services/transaction_service.py:748`) по-прежнему стоит `raw_text=last_raw_text` вместо `raw_text=None`.
+3. **Блок 3 (Исправление сломанных фич из `f1788dc`) — НЕ ВЫПОЛНЕНО:**
+   - **`ON DELETE CASCADE` и удаление аккаунта:** Ни в моделях (`transaction.py:34`, `credit.py:23`, `alias.py:19`, `category.py:27`), ни в внешних ключах БД `smart_bujet` и `smart_bujet_dev` (где `ON DELETE CASCADE` нет даже на `asset_accounts_user_id_fkey`!) каскадное удаление не добавлено. Вызов `DELETE /api/v1/auth/me` (`src/api/v1/auth.py:67-90`) гарантированно падает с `500 ForeignKeyViolationError`. При удалении единственного участника семьи вызывается `await session.delete(family)` без обнуления `current_user.family_group_id = None`. Кнопки удаления аккаунта в MiniApp и команды `/delete_account` в боте нет.
+   - **`AIRateLimiter` остаётся мёртвым кодом:** класс объявлен в `src/services/ai_service.py`, но `ai_rate_limiter.check_and_record()` нигде в `src/` не вызывается (0 вызовов). На `POST /api/v1/family/join` также нет rate limiting.
+   - **Команда `/facts` в `smart-bujet-dev`:** зарегистрирована в меню бота (`src/main.py:80`), но обработчика `Command("facts")` в `src/bot/handlers/` нет (бот просто игнорирует нажатие).
+   - **Экран согласия с Политикой конфиденциальности при `/start`:** отсутствует.
+
+---
+
+## 2. Аудит загрузки банковских выписок в `smart-bujet-dev` (коммит `d819165`)
+
+### 2.1. Пять фатальных ошибок исполнения (Runtime Crashes & Regressions)
+Разработчик проверил `BankStatementService` только unit-тестом `tests/test_bank_statement_import.py:47-134`, в котором полностью замокал `session`, `CategoryService`, `TransactionService` и `parse_single_pdf` через `AsyncMock`. **В реальном рантайме фича не работает вообще (падает со 100% вероятностью в 4 разных местах) и ломает распознавание PDF-чеков для всех пользователей:**
+
+1. **[FATAL CRASH #1] `AttributeError: 'CategoryService' object has no attribute 'get_all_categories'`:**
+   - В `BankStatementService.import_statements` (`src/services/bank_statement_service.py:117-118`) вызывается:
+     ```python
+     cat_service = CategoryService(self.session)
+     categories = await cat_service.get_all_categories()
+     ```
+   - В классе `CategoryService` (`src/services/category_service.py:34-91`) **метода `get_all_categories()` НЕ СУЩЕСТВУЕТ** (реальный метод называется `get_categories(user_id=..., cat_type=...)`). При нажатии кнопки `✅ Готово, обработать` (`statement:process` в `src/bot/handlers/start.py:283`) бот немедленно падает с `AttributeError`!
+2. **[FATAL CRASH #2] `NameError: name 'asyncio' is not defined` при вызове Gemini:**
+   - В `BankStatementService.parse_single_pdf` (`src/services/bank_statement_service.py:88`) вызывается `await asyncio.to_thread(self.client.models.generate_content, ...)`.
+   - Однако в начале файла `src/services/bank_statement_service.py:1-28` **пропущен `import asyncio`**! Любой реальный вызов `parse_single_pdf` падает с `NameError: name 'asyncio' is not defined` (перехватывается в `except Exception` на строке 98 и всегда возвращает пустой список транзакций `[]`).
+3. **[FATAL CRASH #3] `NotNullViolationError` на колонке `transactions.source` при `session.commit()`:**
+   - В `BankStatementService.import_statements` (`src/services/bank_statement_service.py:229-239`) создаётся `Transaction(...)` **без передачи поля `source`**.
+   - В модели `Transaction.source` (`src/models/transaction.py:48`) и в таблице `transactions` в PostgreSQL колонка `source` имеет ограничение **`NOT NULL` без дефолта** (а в `TransactionSource` enum даже не добавлено значение `statement`). На строке 259 (`await self.session.commit()`) база данных выбрасывает `IntegrityError: null value in column "source" violates not-null constraint`.
+4. **[FATAL CRASH #4] `DataError` в `asyncpg` из-за `tzinfo=timezone.utc` в `created_at` (`TIMESTAMP WITHOUT TIME ZONE`):**
+   - В `BankStatementService.import_statements` (`src/services/bank_statement_service.py:185-191`) дата парсится с `tzinfo=timezone.utc` (offset-aware) и на строке 236 передаётся в `created_at=item["date"]`.
+   - В БД (`\d+ transactions`) и `TimestampMixin` (`src/models/base.py:14`) колонка `created_at` имеет тип `timestamp without time zone` (offset-naive). При попытке вставки `asyncpg` выбрасывает `DataError: can't subtract offset-naive and offset-aware datetimes`.
+5. **[FATAL REGRESSION #5] Хэндлер `@router.message(F.document)` в `start.py` сломал загрузку PDF-чеков для всех активных пользователей:**
+   - В `src/bot/bot.py:31-36` роутер `start.router` зарегистрирован **первым** (строка 31), а `photo_tx.router` — **шестым** (строка 36).
+   - В `src/bot/handlers/start.py:208-240` декоратор `@router.message(F.document)` объявлен без фильтров состояния и перехватывает **любой** документ от любого пользователя.
+   - Когда активный пользователь (у которого `initial_balance` уже задан) отправляет боту PDF-чек покупки, `handle_statement_pdf_upload` доходит до конца функции и возвращает `None`. В `aiogram 3.x` возврат `None` из сработавшего хэндлера **останавливает распространение апдейта**, поэтому `process_document_receipt` в `src/bot/handlers/photo_tx.py:141` **больше никогда не вызывается**!
+   - При этом созданный разработчиком файл `src/bot/states.py:1-8` (`OnboardingStates`) **вообще нигде не импортируется и не используется** (очередной мёртвый код).
+
+---
+
+### 2.2. Уязвимости безопасности и ПДн в загрузке банковских выписок
+
+1. **[CRITICAL PRIVACY LEAK] Отправка сырых PDF банковских выписок со всеми ПДн напрямую в Google Gemini в обход `PIIGuardrailService`:**
+   - В `BankStatementService.parse_single_pdf` (`src/services/bank_statement_service.py:87-92`) байты PDF (`types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")`) отправляются **напрямую в облако Google Gemini** без локального извлечения текста и без маскирования через `PIIGuardrailService`.
+   - Банковская выписка (Kaspi Gold, Halyk, Forte, Сбер, Тинькофф) содержит: полное ФИО владельца счёта, ИИН/ИНН, полный номер счёта IBAN (`KZ...`), номер карты, адрес/телефон, точные остатки по счетам и **полные ФИО/имена всех получателей и отправителей P2P-переводов**.
+   - Более того, промпт (`src/services/bank_statement_service.py:63`) требует записывать имя контрагента/получателя перевода в `item_name`. В результате ФИО всех людей, которым пользователь переводил деньги (*«Айгерим К.»*, *«Серик М.»*), сохраняются в таблице `transactions.item_name` **в открытом виде (`plaintext`)**!
+   - При ошибке парсинга JSON функция `clean_gemini_json` (`src/services/bank_statement_service.py:37`) также пишет первые 200 символов ответа выписки в `logger.warning` (в stdout контейнера).
+2. **[HIGH] Уязвимость к DoS / OOM (Out-Of-Memory) и исчерпанию квот Gemini:**
+   - **Отсутствует проверка размера файла и лимит количества файлов:** В `handle_statement_pdf_upload` (`src/bot/handlers/start.py:209-239`) и `on_statement_process` (`:243-280`) нет проверки `doc.file_size` (в отличие от `photo_tx.py:151`) и нет лимита на длину списка `STATEMENT_BUFFER[user_id]`.
+   - **Одновременная загрузка всех PDF в RAM:** На строках `src/bot/handlers/start.py:270-273` все файлы из буфера скачиваются в оперативную память одновременно (`downloaded.append((file_name, buf.getvalue()))`). При лимите контейнера в **240 MiB RAM** отправка 10–15 PDF по 15–20 МБ убьёт бэкенд через **Linux OOM Killer**.
+   - **Утечка памяти в глобальном словаре `STATEMENT_BUFFER`:** Словарь `STATEMENT_BUFFER: dict[int, list[tuple[str, str]]] = defaultdict(list)` (`src/bot/handlers/start.py:37`) хранится в RAM бесконечно: если пользователь загрузил PDF и не нажал кнопку обработки, записи никогда не удаляются (нет TTL).
+   - **Отсутствие `AIRateLimiter` и таймаутов:** В `import_statements` (`src/services/bank_statement_service.py:130-131`) цикл `for filename, pdf_bytes in files:` вызывает Gemini без `AIRateLimiter` и без ограничения числа страниц.
+3. **[HIGH] Race Condition при двойном клике и полное отсутствие дедупликации (идемпотентности):**
+   - **Гонка при двойном нажатии кнопки `✅ Готово, обработать`:** В `on_statement_process` (`src/bot/handlers/start.py:245-294`) очистка буфера `STATEMENT_BUFFER.pop(user_id, None)` происходит только на **строке 294** — *после* скачивания всех файлов и завершения всех запросов к Gemini (что занимает 10–30 секунд). Если пользователь нажмёт кнопку дважды, оба запроса параллельно обработают один и тот же буфер и **запишут все транзакции в БД дважды**!
+   - **Забыта дедупликация транзакций:** Хотя в архитектурном документе (`C:\Users\aanto\code-vault\smart_bujet_prod_security_dev_statements_architecture.md:244`) разработчик описал дедупликацию по ключу `(date[:10], amount, item_name_normalized)`, в реальном коде `BankStatementService.import_statements` (`src/services/bank_statement_service.py:171-245`) **никакой дедупликации нет вообще** — ни внутри пачки выписок, ни против уже существующих в БД транзакций!
+4. **[MEDIUM] Ошибки финансовой логики, `/reset`, категорий, семейного бюджета и HTML-инъекции:**
+   - **Опасная команда `/reset` без подтверждения:** В `src/bot/handlers/start.py:83-98` команда `/reset` доступна любому пользователю и без подтверждения удаляет все его `Transaction`, но оставляет нетронутыми `AssetAccount` и `CreditAccount`, разрушая консистентность балансов.
+   - **Рассинхрон категорий промпта с БД:** В промпте (`src/services/bank_statement_service.py:64`) указаны категории `'Кафе и рестораны'`, `'Коммунальные услуги'`, `'Связь'`, которых **нет** в системном справочнике `DEFAULT_CATEGORIES` (`src/services/category_service.py:6-31`, где используются `'Еда вне дома'` и `'Обязательные расходы'`). Из-за этого все рестораны, связь и коммуналка из выписки не находятся в `cat_map` и попадают в `'Прочее'`.
+   - **Коллизия `cat_map` по имени категории без учёта `CategoryType`:** В `src/services/bank_statement_service.py:119` словарь строится как `{c.name.lower(): c for c in categories}`. Категория `"Денежный перевод"` существует в 4 типах (`expense`, `income`, `transfer_out`, `transfer_in`), поэтому в `cat_map` перезаписывается только один тип, и расходная транзакция привязывается к категории чужого типа.
+   - **Искажение аналитики внутренними переводами на депозит:** Промпт (`src/services/bank_statement_service.py:62`) заставляет классифицировать любую операцию только как `expense` или `income`. В итоге переводы между своей картой (Kaspi Gold) и своим депозитом (Kaspi Депозит) записываются как доходы и расходы, раздувая аналитику.
+   - **Неверный расчёт `initial_balance` при нескольких выписках или отсутствии `closing_balance`:** На строках `src/services/bank_statement_service.py:161-168, 251-258` берётся `latest_closing_balance` только от одного банка, но из него вычитается `net_cashflow` **всех** загруженных банков; а если `closing_balance` равен `None`, `initial_balance` принудительно ставится в `0.0`, уводя баланс в минус.
+   - **Потеря `family_group_id` и `user_item_aliases`:** Транзакции из выписки создаются без `family_group_id=user.family_group_id` (`src/services/bank_statement_service.py:229-238`) и не видны в семейном бюджете, а таблица привычек `user_item_aliases` не пополняется.
+   - **Неэкранированный HTML и риск Prompt Injection:** В `src/bot/handlers/start.py:234` (`file_name`) и `:300` (`banks_str`) строки вставляются в HTML-сообщение без `html.escape()`. В `parse_single_pdf` (`src/services/bank_statement_service.py:88-92`) не задан `GenerateContentConfig(response_mime_type="application/json")` и нет защиты от Prompt Injection через текст назначения платежа.
+
+---
+
+## 3. Аудит персонализации (`user_agent_memories`) в `smart-bujet-dev`
+
+1. **Что сделано правильно (✅):**
+   - В `src/api/v1/facts.py:48-132` все операции чтения, обновления (`PATCH /{fact_id}`) и удаления (`DELETE /{fact_id}`) проверяют `fact.user_id != current_user.id` (IDOR отсутствует).
+   - В `src/static/app.js:2111-2116` для рендеринга карточек используется `textContent` (DOM XSS отсутствует).
+2. **Что упущено или уязвимо (⚠️):**
+   - `UserAgentMemory.fact_text` (`src/models/agent_memory.py:31`) хранится в БД в открытом виде (`plaintext`) без `EncryptedString`.
+   - При классификации факта (`AIService.classify_user_fact` в `src/services/ai_service.py:559-596`) и генерации совета (`AIService.generate_financial_advice` в `:421-485`) `fact_text` отправляется в Gemini **в обход `PIIGuardrailService.mask_text`**.
+   - **Prompt Injection и спам:** На `POST /api/v1/facts/` (`src/api/v1/facts.py:57-88`) не вызывается `ai_rate_limiter` и нет лимита на максимальное количество фактов у пользователя (например, не более 50 фактов). В `src/bot/handlers/summary.py:202-235` выборка фактов не ограничена `.limit()`, а в `ai_service.py:428-437, 580` пользовательский `fact_text` конкатенируется в промпт без XML-тега/экранирования.
+   - В авто-отчётах по расписанию (`src/core/report_scheduler.py:116`) факты не передаются в `generate_financial_advice`, а команда `/facts` в боте (`src/main.py:80`) не имеет хэндлера.
+
+---
+
+## 4. Блок 4 (Дополнение к ТЗ): что агент ОБЯЗАН исправить в `smart-bujet-dev` по выпискам и персонализации
+
+В дополнение к **Блокам 1, 2 и 3** (которые должны быть выполнены на 100% как в Prod, так и в Dev), в `smart-bujet-dev` необходимо выполнить:
+
+1. **Устранить все 5 фатальных крашей и регрессий импорта выписок:**
+   - В `src/services/bank_statement_service.py`:
+     - Добавить `import asyncio` в начало файла.
+     - Заменить несуществующий вызов `await cat_service.get_all_categories()` на `await cat_service.get_categories(user_id=user.id)`.
+     - Строить индекс категорий с учётом типа: `cat_map = {(c.name.lower(), c.type.value): c for c in categories}`, а список названий категорий в промпте формировать динамически из реальных категорий БД (чтобы не было несуществующих `'Кафе и рестораны'` вместо `'Еда вне дома'`).
+     - Добавить значение `statement = "statement"` в `TransactionSource` (`src/models/transaction.py:23-27`) и передавать `source=TransactionSource.statement.value` и `family_group_id=user.family_group_id` при создании `Transaction` в `import_statements`.
+     - Приводить `item["date"]` к naive UTC (`dt.replace(tzinfo=None)`) перед записью в `created_at` (`TIMESTAMP WITHOUT TIME ZONE`).
+   - В `src/bot/handlers/start.py`:
+     - Повесить на `handle_statement_pdf_upload` строгий фильтр состояния FSM (`OnboardingStates.waiting_for_statement`) либо проверять фильтр на уровне декоратора роутера, чтобы обычные PDF-чеки активных пользователей беспрепятственно проходили в `src/bot/handlers/photo_tx.py:141`!
+2. **Обеспечить защиту ПДн (`PIIGuardrailService` + локальный парсинг PDF) при загрузке выписок:**
+   - **Не отправлять сырой PDF-файл в Gemini целиком!** Извлекать текст из PDF локально в памяти на сервере (через `pypdf` / `pymupdf` / `pdfplumber`), прогонять извлечённый текст через `PIIGuardrailService.mask_text(..., known_names=known_names)` (плюс регулярное выражение для маскирования ФИО вида `Фамилия И.` / `Имя О.` в строках переводов) и отправлять в Gemini **только обезличенный текст**.
+   - Для P2P-переводов не сохранять ФИО контрагентов в БД: записывать обобщённое `item_name = "Перевод клиенту банка"` / `"Пополнение переводом"`, которое затем шифруется через `EncryptedString` (`AES-256-GCM`).
+   - Убрать логирование сырого ответа Gemini из `clean_gemini_json` (`src/services/bank_statement_service.py:37`).
+3. **Защитить загрузку выписок от DoS / OOM, Race Condition и дублирования:**
+   - Ограничить размер одного PDF-файла до `5 МБ` (`doc.file_size <= 5 * 1024 * 1024`), количество файлов за одну загрузку — до `3 файлов`, количество страниц — до `20 страниц`.
+   - Скачивать файлы по одному непосредственно перед парсингом (после чего освобождать буфер байтов), не держа все PDF в RAM одновременно.
+   - В `on_statement_process` (`src/bot/handlers/start.py:245`) атомарно забирать буфер `file_entries = STATEMENT_BUFFER.pop(user_id, None)` **в самом начале функции** (до `await`), чтобы двойное нажатие кнопки не запускало параллельный повторный импорт.
+   - Подключить `ai_rate_limiter.check_and_record(user_id)` перед каждым вызовом Gemini.
+   - Реализовать реальную дедупликацию транзакций при импорте: как внутри загружаемого батча, так и против уже существующих транзакций пользователя в БД за этот период (по дате, сумме и типу/нормализованному названию).
+   - Исключать внутренние переводы между собственными счетами/депозитами (напр., `"Перевод на Kaspi Депозит"`, `"С Kaspi Депозита"`) из `expense`/`income`, чтобы не искажать статистику доходов и расходов.
+   - Защитить команду `/reset` в `start.py:83-98`: либо ограничить её только dev-режимом с двухшаговым подтверждением (и полным сбросом всех связанных счетов), либо объединить с полноценным `/delete_account`.
+   - Экранировать `html.escape(file_name)` и `html.escape(banks_str)` в `src/bot/handlers/start.py:234, 300` и использовать `GenerateContentConfig(response_mime_type="application/json")` в `parse_single_pdf`.
+4. **Написать честный интеграционный тест импорта выписки:**
+   - В `tests/test_bank_statement_import.py` добавить интеграционный тест с реальной тестовой БД (`AsyncSession`) и реальным `CategoryService` (замокав только сетевой вызов `self.client.models.generate_content`), который проверяет сохранение `Transaction` в БД и ловлю всех constraint/type ошибок.

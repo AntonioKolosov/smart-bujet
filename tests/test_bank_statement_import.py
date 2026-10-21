@@ -63,6 +63,7 @@ class TestBankStatementImport(unittest.IsolatedAsyncioTestCase):
 
             cat_service_instance = MockCatService.return_value
             cat_service_instance.get_all_categories = AsyncMock(return_value=[cat_food, cat_salary, cat_other])
+            cat_service_instance.get_categories = AsyncMock(return_value=[cat_food, cat_salary, cat_other])
 
             tx_service_instance = MockTxService.return_value
             tx_service_instance.get_user_balance = AsyncMock(return_value={

@@ -1,4 +1,6 @@
 import logging
+import time
+from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +13,17 @@ from src.bot.bot import bot
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_JOIN_FAILED_ATTEMPTS: dict[int, list[float]] = defaultdict(list)
+
+def _check_join_rate_limit(user_id: int) -> bool:
+    now = time.time()
+    cutoff = now - 600  # 10 minutes
+    _JOIN_FAILED_ATTEMPTS[user_id] = [t for t in _JOIN_FAILED_ATTEMPTS[user_id] if t > cutoff]
+    return len(_JOIN_FAILED_ATTEMPTS[user_id]) < 5
+
+def _record_failed_join(user_id: int) -> None:
+    _JOIN_FAILED_ATTEMPTS[user_id].append(time.time())
 
 
 class JoinFamilyRequest(BaseModel):
@@ -43,9 +56,16 @@ async def join_family_group(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    if not _check_join_rate_limit(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Слишком много попыток ввода инвайт-кода. Подождите 10 минут."
+        )
+
     service = FamilyService(session)
     group, partner_id, msg = await service.join_by_invite(current_user, data.invite_code)
     if not group:
+        _record_failed_join(current_user.id)
         status_code = status.HTTP_400_BAD_REQUEST if "уже состоите" in msg else status.HTTP_404_NOT_FOUND
         raise HTTPException(status_code=status_code, detail=msg)
 

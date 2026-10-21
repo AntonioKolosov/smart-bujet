@@ -81,8 +81,16 @@ async def delete_my_account(
             )
             if other_member:
                 family.owner_id = other_member.id
+                current_user.family_group_id = None
+                await session.flush()
             else:
+                current_user.family_group_id = None
+                await session.flush()
                 await session.delete(family)
+                await session.flush()
+        else:
+            current_user.family_group_id = None
+            await session.flush()
 
     await session.delete(current_user)
     await session.commit()

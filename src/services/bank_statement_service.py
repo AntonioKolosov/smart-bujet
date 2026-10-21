@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import io
 import json
 import logging
 import re
@@ -11,7 +13,7 @@ from sqlalchemy import select
 
 from src.core.config import settings
 from src.models.user import User
-from src.models.transaction import Transaction
+from src.models.transaction import Transaction, TransactionSource
 from src.models.category import Category, CategoryType
 from src.services.category_service import CategoryService
 from src.services.transaction_service import TransactionService
@@ -22,6 +24,11 @@ try:
 except ImportError:
     genai = None
     types = None
+
+try:
+    import pypdf
+except ImportError:
+    pypdf = None
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +45,34 @@ def clean_gemini_json(raw_text: str) -> dict[str, Any]:
         return {}
 
 
+def extract_and_redact_pdf_text(pdf_bytes: bytes, max_pages: int = 20) -> tuple[str, bool]:
+    """
+    Extracts text from PDF up to max_pages and redacts sensitive PII (IBAN, card numbers, IIN).
+    Returns (cleaned_text, is_empty_or_scanned).
+    """
+    if not pypdf:
+        return "", True
+
+    try:
+        reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+        pages = reader.pages[:max_pages]
+        text_content = "\n".join(page.extract_text() or "" for page in pages).strip()
+        if not text_content or len(text_content) < 40:
+            return "", True
+
+        # Redact IBAN
+        text_content = re.sub(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b", "[IBAN_MASKED]", text_content)
+        # Redact Card numbers (13-19 digits with optional spaces/dashes)
+        text_content = re.sub(r"\b(?:\d[ -]*?){13,19}\b", "[CARD_MASKED]", text_content)
+        # Redact IIN/BIN (12 digits)
+        text_content = re.sub(r"\b\d{12}\b", "[ID_MASKED]", text_content)
+
+        return text_content, False
+    except Exception as exc:
+        logger.warning("Local PDF extraction failed: %s", exc)
+        return "", True
+
+
 class BankStatementService:
     def __init__(self, session: AsyncSession, api_key: str | None = None, model_name: str | None = None):
         self.session = session
@@ -46,10 +81,16 @@ class BankStatementService:
         self.model_name = model_name or settings.gemini_model
 
     async def parse_single_pdf(self, pdf_bytes: bytes, filename: str) -> dict[str, Any]:
-        """Parse one bank statement PDF using Gemini multimodal capabilities."""
+        """Parse one bank statement PDF using Gemini."""
         if not self.client:
             logger.error("Gemini client not initialized for BankStatementService")
             return {"error": "AI service unavailable", "transactions": []}
+
+        # 5 MB file size limit
+        if len(pdf_bytes) > 5 * 1024 * 1024:
+            return {"error": "Размер файла превышает лимит 5 МБ", "transactions": []}
+
+        extracted_text, is_scanned = extract_and_redact_pdf_text(pdf_bytes, max_pages=20)
 
         prompt = (
             "Ты специализированный финансовый анализатор банковских выписок (PDF) приложения Smart Bujet.\n"
@@ -84,11 +125,16 @@ class BankStatementService:
         )
 
         try:
-            pdf_part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
+            if not is_scanned and extracted_text:
+                contents = [prompt, f"ТЕКСТ ВЫПИСКИ (PII ОБЕЗЛИЧЕНО):\n{extracted_text[:35000]}"]
+            else:
+                pdf_part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
+                contents = [prompt, pdf_part]
+
             response = await asyncio.to_thread(
                 self.client.models.generate_content,
                 model=self.model_name,
-                contents=[prompt, pdf_part],
+                contents=contents,
             )
             raw_text = response.text or ""
             parsed = clean_gemini_json(raw_text)
@@ -113,12 +159,47 @@ class BankStatementService:
         if not user:
             raise ValueError(f"User {user_id} not found")
 
-        # Ensure categories exist
+        # Limit to max 3 files per upload
+        files = files[:3]
+
+        # Fetch existing categories safely
         cat_service = CategoryService(self.session)
-        categories = await cat_service.get_all_categories()
-        cat_map: dict[str, Category] = {c.name.lower(): c for c in categories}
-        default_expense_cat = cat_map.get("прочее") or (categories[0] if categories else None)
-        default_income_cat = cat_map.get("зарплата") or cat_map.get("доход") or default_expense_cat
+        if hasattr(cat_service, "get_categories") and callable(getattr(cat_service, "get_categories")):
+            res = cat_service.get_categories(user_id=user.id)
+            categories = await res if asyncio.iscoroutine(res) or hasattr(res, "__await__") else res
+        elif hasattr(cat_service, "get_all_categories") and callable(getattr(cat_service, "get_all_categories")):
+            res = cat_service.get_all_categories()
+            categories = await res if asyncio.iscoroutine(res) or hasattr(res, "__await__") else res
+        else:
+            categories = []
+        if categories is None:
+            categories = []
+        cat_map: dict[tuple[str, str], Category] = {
+            (c.name.lower(), c.type.value if hasattr(c.type, 'value') else str(c.type)): c
+            for c in categories
+        }
+        cat_by_name: dict[str, Category] = {c.name.lower(): c for c in categories}
+        default_expense_cat = cat_by_name.get("прочее") or (categories[0] if categories else None)
+        default_income_cat = cat_by_name.get("зарплата") or cat_by_name.get("доход") or default_expense_cat
+
+        # Pre-fetch existing statement transactions to deduplicate across re-uploads
+        existing_keys: set[tuple] = set()
+        try:
+            db_res = await self.session.execute(
+                select(Transaction.transaction_date, Transaction.amount, Transaction.type, Transaction.item_name)
+                .where(Transaction.user_id == user.id, Transaction.source == TransactionSource.statement)
+            )
+            raw_all = db_res.all() if hasattr(db_res, "all") else []
+            if asyncio.iscoroutine(raw_all):
+                raw_all = await raw_all
+            if isinstance(raw_all, (list, tuple, set)):
+                existing_keys = {
+                    (tx[0].date() if tx[0] else None, tx[1], tx[2], (tx[3] or "")[:30].strip().lower())
+                    for tx in raw_all
+                    if isinstance(tx, (tuple, list)) and len(tx) >= 4
+                }
+        except Exception as e:
+            logger.warning("Could not pre-fetch existing statement transactions: %s", e)
 
         all_tx_records: list[dict[str, Any]] = []
         bank_names: set[str] = set()
@@ -126,6 +207,8 @@ class BankStatementService:
         latest_closing_balance: float | None = None
         latest_statement_date: datetime | None = None
         earliest_statement_date: datetime | None = None
+
+        seen_batch: set[tuple] = set()
 
         for filename, pdf_bytes in files:
             statement_data = await self.parse_single_pdf(pdf_bytes, filename)
@@ -140,7 +223,7 @@ class BankStatementService:
             # Track dates and closing balance
             p_end_str = statement_data.get("period_end")
             p_start_str = statement_data.get("period_start")
-            
+
             p_end = None
             if p_end_str:
                 try:
@@ -192,18 +275,28 @@ class BankStatementService:
                     except Exception:
                         pass
 
+                tx_type = CategoryType.income if tx.get("type") == "income" else CategoryType.expense
+                item_name = str(tx.get("item_name") or "Операция по выписке").strip()[:200]
+                amount_dec = Decimal(str(num_amt))
+
+                # Batch & DB Deduplication
+                dedup_key = (tx_date.date(), amount_dec, tx_type, item_name[:30].lower())
+                if dedup_key in seen_batch or dedup_key in existing_keys:
+                    continue
+                seen_batch.add(dedup_key)
+
                 all_tx_records.append({
                     "date": tx_date,
-                    "amount": Decimal(str(num_amt)),
-                    "type": CategoryType.income if tx.get("type") == "income" else CategoryType.expense,
-                    "item_name": str(tx.get("item_name") or "Операция по выписке").strip()[:200],
+                    "amount": amount_dec,
+                    "type": tx_type,
+                    "item_name": item_name,
                     "category": str(tx.get("category") or "").strip(),
                 })
 
         if not all_tx_records:
             return {
                 "success": False,
-                "error": "Не удалось обнаружить операции в загруженных выписках.",
+                "error": "Не удалось обнаружить новые операции в загруженных выписках.",
                 "total_count": 0,
             }
 
@@ -216,24 +309,29 @@ class BankStatementService:
         if latest_statement_date is None:
             latest_statement_date = all_tx_records[-1]["date"]
 
-        # Insert transactions into database with raw_text=None (data minimization)
+        # Insert transactions into database with naive UTC datetime and source=statement
         total_period_expense = Decimal("0")
         total_period_income = Decimal("0")
 
         for item in all_tx_records:
             cat_name = item["category"].lower()
-            matched_cat = cat_map.get(cat_name)
+            type_str = item["type"].value if hasattr(item["type"], 'value') else str(item["type"])
+            matched_cat = cat_map.get((cat_name, type_str)) or cat_by_name.get(cat_name)
             if not matched_cat:
                 matched_cat = default_income_cat if item["type"] == CategoryType.income else default_expense_cat
 
+            naive_dt = item["date"].replace(tzinfo=None) if item["date"].tzinfo else item["date"]
+
             tx_obj = Transaction(
                 user_id=user.id,
+                family_group_id=user.family_group_id,
                 category_id=matched_cat.id if matched_cat else 1,
                 amount=item["amount"],
                 type=item["type"],
                 item_name=item["item_name"],
-                transaction_date=item["date"],
-                created_at=item["date"],
+                transaction_date=naive_dt,
+                created_at=naive_dt,
+                source=TransactionSource.statement,
                 raw_text=None,
             )
             self.session.add(tx_obj)
@@ -253,7 +351,6 @@ class BankStatementService:
             calculated_initial = Decimal(str(latest_closing_balance)) - net_cashflow
             user.initial_balance = max(Decimal("0.0"), calculated_initial)
         else:
-            # If statement didn't specify closing balance, set initial balance to 0 and current balance = net
             user.initial_balance = Decimal("0.0")
 
         await self.session.commit()
@@ -261,7 +358,7 @@ class BankStatementService:
         # Compute current month metrics
         now = datetime.now(timezone.utc)
         start_current_month = datetime(now.year, now.month, 1, 0, 0, 0, tzinfo=timezone.utc)
-        
+
         current_month_expense = sum(
             x["amount"] for x in all_tx_records
             if x["type"] == CategoryType.expense and x["date"] >= start_current_month
@@ -288,5 +385,5 @@ class BankStatementService:
             "current_month_expense": float(current_month_expense),
             "current_month_income": float(current_month_income),
             "current_balance": live_balance_data["current_balance"],
-            "currency": user.currency,
+            "currency": user.currency or "KZT",
         }

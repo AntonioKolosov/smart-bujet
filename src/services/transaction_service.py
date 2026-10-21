@@ -26,6 +26,7 @@ from src.services.ai_service import AIService
 from src.services.dynamic_context_service import DynamicContextService
 from src.services.discount_service import DiscountDistributor
 from src.bot.messages import format_amount
+from src.core.security import blind_index
 
 logger = logging.getLogger(__name__)
 
@@ -185,10 +186,10 @@ class TransactionService:
         cat_type: CategoryType | None = None
     ) -> Category | None:
         """Local alias lookup (10-15 ms) without sending requests to Gemini."""
-        normalized = item_name.strip().lower()
+        alias_hash = blind_index(item_name)
         query = select(UserItemAlias).where(
             UserItemAlias.user_id == user_id,
-            UserItemAlias.item_name_normalized == normalized
+            UserItemAlias.item_name_normalized == alias_hash
         )
         alias = await self.session.scalar(query)
         if alias:
@@ -199,11 +200,11 @@ class TransactionService:
         return None
 
     async def _save_alias(self, user_id: int, item_name: str, category_id: int) -> None:
-        """Cache user item alias for future fast lookups."""
-        normalized = item_name.strip().lower()
+        """Cache user item alias for future fast lookups using blind indexing."""
+        alias_hash = blind_index(item_name)
         query = select(UserItemAlias).where(
             UserItemAlias.user_id == user_id,
-            UserItemAlias.item_name_normalized == normalized
+            UserItemAlias.item_name_normalized == alias_hash
         )
         alias = await self.session.scalar(query)
         if alias:
@@ -212,7 +213,7 @@ class TransactionService:
         else:
             new_alias = UserItemAlias(
                 user_id=user_id,
-                item_name_normalized=normalized,
+                item_name_normalized=alias_hash,
                 category_id=category_id,
                 usage_count=1
             )
@@ -421,7 +422,8 @@ class TransactionService:
                 assets_context=assets_context,
                 credits_context=credits_context,
                 few_shots_prompt=few_shots_prompt,
-                known_names=known_names
+                known_names=known_names,
+                user_id=user_id
             )
             if payload.get("is_financial") is False:
                 raise OffTopicMessageError("Сообщение не относится к финансовым операциям", raw_text=text)
@@ -614,7 +616,8 @@ class TransactionService:
             cat_names,
             assets_context=assets_context,
             credits_context=credits_context,
-            few_shots_prompt=few_shots_prompt
+            few_shots_prompt=few_shots_prompt,
+            user_id=user_id
         )
         if payload.get("is_financial") is False:
             raise OffTopicMessageError("Голосовое сообщение не содержит финансовых операций", raw_text=None)
@@ -745,7 +748,7 @@ class TransactionService:
                 asset_amount=float(asset_amt) if asset_amt is not None else None,
                 exchange_rate=float(ex_rate) if ex_rate is not None else None,
                 item_name=normalized_name,
-                raw_text=last_raw_text,
+                raw_text=None,
                 source=TransactionSource.voice,
             )
             tx.category = category
@@ -756,7 +759,7 @@ class TransactionService:
             transactions.append(tx)
 
             # Check and handle intra-family transfer mirror
-            await self._handle_intra_family_mirror(user, tx, last_raw_text)
+            await self._handle_intra_family_mirror(user, tx, None)
 
         if not transactions:
             raise InvalidTransactionAmountError("Amount must be greater than 0", raw_text=last_raw_text)
@@ -873,9 +876,9 @@ class TransactionService:
         cat_names = list({c.name for c in available_cats})
 
         if mime_type == "application/pdf":
-            payload = await self.ai_service.parse_receipt_media(media_bytes, mime_type, cat_names)
+            payload = await self.ai_service.parse_receipt_media(media_bytes, mime_type, cat_names, user_id=user_id)
         else:
-            payload = await self.ai_service.parse_receipt_photo(media_bytes, mime_type, cat_names)
+            payload = await self.ai_service.parse_receipt_photo(media_bytes, mime_type, cat_names, user_id=user_id)
         if payload.get("is_financial") is False:
             doc_label = "PDF-документе" if mime_type == "application/pdf" else "фотографии"
             raise OffTopicMessageError(f"В {doc_label} не обнаружен кассовый чек", raw_text=None)
@@ -928,7 +931,7 @@ class TransactionService:
         cat_names = list({c.name for c in available_cats})
 
         parse_tasks = [
-            self.ai_service.parse_receipt_photo(img, mime_type, cat_names)
+            self.ai_service.parse_receipt_photo(img, mime_type, cat_names, user_id=user_id)
             for img in images
         ]
         raw_payloads = await asyncio.gather(*parse_tasks, return_exceptions=True)

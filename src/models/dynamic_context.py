@@ -23,7 +23,7 @@ class UserClassificationFeedback(Base, TimestampMixin):
     __tablename__ = "user_classification_feedback"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     transaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False)
     original_text: Mapped[str | None] = mapped_column(Text)
     original_type: Mapped[str] = mapped_column(String(32), nullable=False)

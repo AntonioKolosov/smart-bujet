@@ -3,7 +3,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.utils.token import validate_token, TokenValidationError
 from src.core.config import settings
-from src.bot.handlers import start, summary, tx_actions, text_tx, voice_tx, photo_tx, family
+from src.bot.handlers import start, summary, tx_actions, text_tx, voice_tx, photo_tx, family, facts
 from src.bot.middlewares.db_session import DbSessionMiddleware
 
 DUMMY_FALLBACK_TOKEN = "123456789:TEST_BOT_TOKEN_FOR_INIT_TESTS"
@@ -35,4 +35,5 @@ dp.include_router(text_tx.router)
 dp.include_router(voice_tx.router)
 dp.include_router(photo_tx.router)
 dp.include_router(family.router)
+dp.include_router(facts.router)
 

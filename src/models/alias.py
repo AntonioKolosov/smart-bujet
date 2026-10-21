@@ -16,9 +16,9 @@ class UserItemAlias(Base, TimestampMixin):
     __tablename__ = "user_item_aliases"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
-    item_name_normalized: Mapped[str] = mapped_column(String(128), index=True)
-    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    item_name_normalized: Mapped[str] = mapped_column(String(64), index=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id", ondelete="CASCADE"))
     usage_count: Mapped[int] = mapped_column(Integer, default=1)
 
     __table_args__ = (

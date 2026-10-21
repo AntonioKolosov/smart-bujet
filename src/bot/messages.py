@@ -239,6 +239,13 @@ class BotMessages:
         )
 
     @staticmethod
+    def rate_limit_exceeded() -> str:
+        return (
+            "⏳ <b>Слишком много запросов к AI-ассистенту.</b>\n\n"
+            "Пожалуйста, подождите минуту перед следующим обращением."
+        )
+
+    @staticmethod
     def service_unavailable() -> str:
         return "⚠️ Временная ошибка распознавания. Пожалуйста, попробуй ещё раз или отправь текстом."
 

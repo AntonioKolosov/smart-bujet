@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from src.models.user import User
 from src.models.report_log import ScheduledReportLog
+from src.models.agent_memory import UserAgentMemory
 from src.services.report_service import ReportService
 from src.services.ai_service import AIService
 from src.bot.messages import format_summary_card
@@ -113,7 +114,15 @@ async def broadcast_scheduled_reports(
                     period=period_code,
                     ref_date=now
                 )
-                advice = await ai_service.generate_financial_advice(summary)
+                user_facts_rows = (await session.scalars(
+                    select(UserAgentMemory.fact_text)
+                    .where(UserAgentMemory.user_id == user.id, UserAgentMemory.is_active == True)
+                )).all()
+                advice = await ai_service.generate_financial_advice(
+                    summary,
+                    user_id=user.id,
+                    user_facts=list(user_facts_rows)
+                )
 
                 period_name_ru = {"weekly": "Недельная", "monthly": "Месячная", "yearly": "Годовая"}.get(report_type, "")
                 header = f"🔔 <b>{period_name_ru} сводка от Smart Bujet</b>\n\n"

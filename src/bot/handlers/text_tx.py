@@ -4,7 +4,7 @@ from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardRemove
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.services.transaction_service import TransactionService
-from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError, OffTopicMessageError
+from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError, OffTopicMessageError, AIRateLimitExceededError
 from src.models.user import User
 from src.bot.messages import BotMessages
 from src.bot.keyboards.inline import tx_toggle_keyboard
@@ -71,6 +71,8 @@ async def process_text_transaction(message: Message, session: AsyncSession):
             ),
             reply_markup=tx_toggle_keyboard(txs)
         )
+    except AIRateLimitExceededError:
+        await message.reply(BotMessages.rate_limit_exceeded())
     except OffTopicMessageError:
         await message.reply(BotMessages.off_topic_warning("text"))
     except (InvalidTransactionAmountError, TransactionParseError):

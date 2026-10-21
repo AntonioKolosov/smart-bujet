@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import io
 import logging
 from collections import defaultdict
@@ -207,6 +208,11 @@ async def on_onboard_statement(callback: CallbackQuery):
 
 @router.message(F.document)
 async def handle_statement_pdf_upload(message: Message, session: AsyncSession):
+    user_id = message.from_user.id
+    if user_id not in STATEMENT_BUFFER:
+        # Not currently uploading bank statements. Let receipt handlers handle other documents.
+        return
+
     doc = message.document
     if not doc:
         return
@@ -218,31 +224,23 @@ async def handle_statement_pdf_upload(message: Message, session: AsyncSession):
     if not is_pdf:
         return
 
-    user_id = message.from_user.id
-    user = await session.scalar(select(User).where(User.id == user_id))
+    file_name = doc.file_name or f"statement_{len(STATEMENT_BUFFER[user_id])+1}.pdf"
+    STATEMENT_BUFFER[user_id].append((doc.file_id, file_name))
+    count = len(STATEMENT_BUFFER[user_id])
+    safe_name = html.escape(file_name)
 
-    # Catch PDF if in statement upload buffer or user hasn't set initial balance yet
-    if user_id in STATEMENT_BUFFER or (user and user.initial_balance is None):
-        if user_id not in STATEMENT_BUFFER:
-            STATEMENT_BUFFER[user_id] = []
-
-        file_name = doc.file_name or f"statement_{len(STATEMENT_BUFFER[user_id])+1}.pdf"
-        STATEMENT_BUFFER[user_id].append((doc.file_id, file_name))
-        count = len(STATEMENT_BUFFER[user_id])
-
-        await message.answer(
-            f"📎 <b>Файл выписки получен:</b> <code>{file_name}</code>\n"
-            f"Всего файлов подготовлено к обработке: <b>{count}</b>\n\n"
-            f"Вы можете отправить ещё файлы или нажать кнопку ниже для обработки:",
-            reply_markup=statement_upload_keyboard(collected_count=count)
-        )
-        return
+    await message.answer(
+        f"📎 <b>Файл выписки получен:</b> <code>{safe_name}</code>\n"
+        f"Всего файлов подготовлено к обработке: <b>{count}</b>\n\n"
+        f"Вы можете отправить ещё файлы или нажать кнопку ниже для обработки:",
+        reply_markup=statement_upload_keyboard(collected_count=count)
+    )
 
 
 @router.callback_query(F.data == "statement:process")
 async def on_statement_process(callback: CallbackQuery, session: AsyncSession, bot: Bot):
     user_id = callback.from_user.id
-    files_meta = STATEMENT_BUFFER.get(user_id, [])
+    files_meta = STATEMENT_BUFFER.pop(user_id, None)
     if not files_meta:
         await callback.answer("Прикрепите хотя бы один PDF-файл выписки", show_alert=True)
         return
@@ -251,7 +249,7 @@ async def on_statement_process(callback: CallbackQuery, session: AsyncSession, b
     if not user:
         user = User(
             id=user_id,
-            username=callback.from_user.username,
+            username=None,
             first_name=callback.from_user.first_name,
             currency="KZT"
         )
@@ -291,9 +289,7 @@ async def on_statement_process(callback: CallbackQuery, session: AsyncSession, b
         )
         return
 
-    STATEMENT_BUFFER.pop(user_id, None)
-
-    banks_str = ", ".join(result.get("bank_names", ["Банк"]))
+    banks_str = html.escape(", ".join(result.get("bank_names", ["Банк"])))
     curr = result.get("currency", "KZT")
     summary_text = (
         f"✅ <b>Выписка успешно загружена и обработана!</b>\n\n"

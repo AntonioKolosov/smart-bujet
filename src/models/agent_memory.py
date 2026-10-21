@@ -3,9 +3,10 @@ from __future__ import annotations
 import uuid
 from enum import Enum
 from typing import TYPE_CHECKING
-from sqlalchemy import BigInteger, String, Text, Boolean, ForeignKey
+from sqlalchemy import BigInteger, String, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.base import Base, TimestampMixin
+from src.core.security import EncryptedText
 
 if TYPE_CHECKING:
     from src.models.user import User
@@ -29,7 +30,7 @@ class UserAgentMemory(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     category: Mapped[str] = mapped_column(String(32), default=FactCategory.other.value, index=True, nullable=False)
-    fact_text: Mapped[str] = mapped_column(Text, nullable=False)
+    fact_text: Mapped[str] = mapped_column(EncryptedText, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True, nullable=False)
 
     user: Mapped["User"] = relationship("User", back_populates="agent_memories")
