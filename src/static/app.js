@@ -380,7 +380,9 @@
         if (currencyBadgeEl) {
           currencyBadgeEl.textContent = `${currencySymbol} ${userCurrency}`;
         }
-        updateSettingsCurrencyUI(userCurrency);
+        if (typeof updateSettingsCurrencyUI === 'function') {
+          updateSettingsCurrencyUI(userCurrency);
+        }
 
         userLiquidBalance = Number(data.current_balance || 0);
         currentBalanceEl.textContent = formatMoney(userLiquidBalance);
@@ -2043,8 +2045,23 @@
   const settingsModal = document.getElementById('settingsModal');
   const closeSettingsModalBtn = document.getElementById('closeSettingsModalBtn');
 
+  function updateSettingsCurrencyUI(curr) {
+    if (!curr) return;
+    try {
+      const btns = document.querySelectorAll('.currency-pill-btn');
+      btns.forEach(btn => {
+        if (btn.getAttribute('data-currency') === curr) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+    } catch (_) {}
+  }
+
   if (settingsBtn && settingsModal) {
-    settingsBtn.addEventListener('click', () => {
+    settingsBtn.addEventListener('click', (e) => {
+      if (e && typeof e.preventDefault === 'function') e.preventDefault();
       updateSettingsCurrencyUI(userCurrency);
       settingsModal.classList.remove('hidden');
     });
