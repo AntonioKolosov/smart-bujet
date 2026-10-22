@@ -1735,10 +1735,7 @@
 
         el.innerHTML = `
           <div class="tx-info">
-            <div class="tx-top-row">
-              <span class="tx-title">${safeTitle}</span>
-              <span class="author-tag ${authorClass}">${safeAuthor}</span>
-            </div>
+            <span class="tx-title">${safeTitle}</span>
             <div class="tx-meta">
               <span class="tx-category">${safeCat}</span>
               <span>•</span>
@@ -1751,6 +1748,7 @@
             </div>
             ${dualBadge}
             ${discountBadge}
+            <span class="author-tag ${authorClass}">${safeAuthor}</span>
           </div>
         `;
         fragment.appendChild(el);
