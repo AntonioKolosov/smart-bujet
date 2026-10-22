@@ -2314,18 +2314,6 @@
   const settingsModal = document.getElementById('settingsModal');
   const closeSettingsModalBtn = document.getElementById('closeSettingsModalBtn');
 
-  function updateSettingsCurrencyUI(curr) {
-    if (!curr) return;
-    const btns = document.querySelectorAll('.currency-pill-btn');
-    btns.forEach(btn => {
-      if (btn.getAttribute('data-currency') === curr) {
-        btn.classList.add('active');
-      } else {
-        btn.classList.remove('active');
-      }
-    });
-  }
-
   if (settingsBtn && settingsModal) {
     settingsBtn.addEventListener('click', () => {
       updateSettingsCurrencyUI(userCurrency);
