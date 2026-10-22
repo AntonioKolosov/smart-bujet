@@ -25,6 +25,8 @@ async def lifespan(app: FastAPI):
     # Ensure database schema is up-to-date with non-breaking migrations
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if conn.dialect.name == "postgresql":
+            await conn.execute(text("ALTER TYPE transactionsource ADD VALUE IF NOT EXISTS 'statement';"))
         await conn.execute(text(
             "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS related_transaction_id UUID REFERENCES transactions(id) ON DELETE SET NULL;"
         ))

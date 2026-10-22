@@ -367,3 +367,110 @@
    - Экранировать `html.escape(file_name)` и `html.escape(banks_str)` в `src/bot/handlers/start.py:234, 300` и использовать `GenerateContentConfig(response_mime_type="application/json")` в `parse_single_pdf`.
 4. **Написать честный интеграционный тест импорта выписки:**
    - В `tests/test_bank_statement_import.py` добавить интеграционный тест с реальной тестовой БД (`AsyncSession`) и реальным `CategoryService` (замокав только сетевой вызов `self.client.models.generate_content`), который проверяет сохранение `Transaction` в БД и ловлю всех constraint/type ошибок.
+
+
+---
+
+# Четвёртый аудит (Re-Audit #4: Prod `17424f1` + Dev `0e9bd43`)
+
+Дата проверки: `2026-10-22`
+Проверенные коммиты:
+- **Prod (`C:\Users\aanto\smart-bujet` и `/home/ag_admin/smart-bujet`):** `17424f1`
+- **Dev (`C:\Users\aanto\smart-bujet-dev` и `/home/ag_admin/smart-bujet-dev`):** `0e9bd43`
+- **Боевой сервер `85.198.89.188`:** контейнеры `smart_bujet_backend`, `smart_bujet_backend_dev`, `postgres_dg_improve` (базы `smart_bujet` и `smart_bujet_dev`), `hashicorp_vault`.
+
+---
+
+## 1. Что реально исправлено и работает на проде и в деве (~75% объёма) ✅
+
+1. **БД `smart_bujet` (Prod) зашифрована и обезличена (`AES-256-GCM` + `HMAC-SHA256`):**
+   - В `src/core/security.py:68-130` реализованы `EncryptedString`, `EncryptedText` (`AES-256-GCM` со случайным 12-байтным `nonce` и префиксом `enc:v1:`) и `blind_index()` (`HMAC-SHA256`).
+   - В боевой БД `smart_bujet` все 196 строк `transactions.item_name`, 5 строк `asset_accounts.name`, 2 строки `credit_accounts.name`/`bank_name` и `users.first_name` зашифрованы (`0` открытых записей).
+   - Все 144 строки `user_item_aliases.item_name_normalized` переведены в 64-символьные хеши `HMAC-SHA256`.
+   - Поле `users.username` очищено (`NULL`), название семьи в `family_groups` изменено с `'Семья Anton'` на `'Семейный бюджет'`, а в `TransactionService.process_voice` (`src/services/transaction_service.py:748`) отключено сохранение `raw_text` (`raw_text=None`).
+2. **Настройки СУБД, `ufw` и ночные зашифрованные бэкапы (`age`):**
+   - Межсетевой экран `ufw` включён (`Status: active`, `Default: deny (incoming)`).
+   - В `pg_hba.conf` внутри `postgres_dg_improve` удалены все правила `trust`; для локальных и Docker-сетей выставлен `scram-sha-256`, а для `0.0.0.0/0` и `::/0` — `reject`.
+   - Лимит `max_connections` в PostgreSQL увеличен до `100` (`SHOW max_connections;` = `100`), а пул в `src/core/database.py:14-21` выставлен в `pool_size=5, max_overflow=10`.
+   - В `crontab` пользователя `ag_admin` добавлено задание `0 3 * * * /home/ag_admin/scripts/backup_smart_bujet.sh`, создающее зашифрованные `.dump.age` архивы в `/home/ag_admin/backups/`, старые незашифрованные `.sql.gz` удалены.
+3. **Каскадное удаление (`ON DELETE CASCADE`), `AIRateLimiter` и команда `/facts`:**
+   - Во всех 7 зависимых таблицах (`asset_accounts`, `categories`, `credit_accounts`, `scheduled_report_logs`, `transactions`, `user_agent_memories`, `user_item_aliases`) и в моделях, и в обеих живых БД (`smart_bujet`, `smart_bujet_dev`) прописан `ON DELETE CASCADE`.
+   - Вызов `ai_rate_limiter.check_and_record(user_id)` встроен во все основные методы `AIService` (`classify_text`, `parse_voice`, `parse_receipt_media`, `generate_financial_advice`), добавлен перехват `AIRateLimitExceededError` в хэндлерах бота и rate limit `_check_join_rate_limit` на `POST /api/v1/family/join` (`src/api/v1/family.py:17-63`).
+   - В `smart-bujet-dev` создан и подключён рабочий хэндлер `/facts` (`src/bot/handlers/facts.py:23-56`).
+4. **Исправления в `BankStatementService` (`smart-bujet-dev`):**
+   - Добавлен `import asyncio` (`src/services/bank_statement_service.py:3`), исправлен вызов `cat_service.get_categories(user_id=user.id)` (`:169`), добавлен `family_group_id=user.family_group_id` (`:327`), приведение `created_at` к naive UTC (`:323, 333`), атомарный `STATEMENT_BUFFER.pop(user_id, None)` в начале `on_statement_process` (`src/bot/handlers/start.py:243`), экранирование `html.escape()` (`:230, 292`), внутрипакетная дедупликация (`seen_batch`) и лимит `5 МБ` на файл.
+
+---
+
+## 2. Что осталось сломанным или недоделанным (Обязательный чек-лист доработок) ❌
+
+### 2.1. [FATAL CRASH В DEV] В PostgreSQL в типе `ENUM transactionsource` отсутствует значение `'statement'`
+* **Где проблема:** В Python-модели (`src/models/transaction.py:29`) добавлено `statement = "statement"`, и в `bank_statement_service.py:334` выставляется `source=TransactionSource.statement`. Но в самой СУБД PostgreSQL (`smart_bujet_dev` и `smart_bujet`) команда `SELECT enum_range(NULL::transactionsource);` возвращает только **`{text,voice,photo,manual}`**!
+* **Последствие:** Любой импорт банковской выписки падает на `await self.session.commit()` (`src/services/bank_statement_service.py:356`) с фатальной ошибкой `asyncpg.exceptions.InvalidTextRepresentationError: invalid input value for enum transactionsource: "statement"`.
+* **Что сделать:** Выполнить в обеих базах (`smart_bujet_dev` и `smart_bujet`) SQL-команду:
+  ```sql
+  ALTER TYPE transactionsource ADD VALUE IF NOT EXISTS 'statement';
+  ```
+  и добавить эту проверку в стартовую миграцию `src/main.py`.
+
+### 2.2. [CRITICAL PRIVACY BUG В DEV] Пакет `pypdf` не добавлен в `requirements.txt` и не установлен в контейнере — PDF выписок на 100% уходят в Gemini сырыми!
+* **Где проблема:**
+  1. В `src/services/bank_statement_service.py:28-31` написано `try: import pypdf except ImportError: pypdf = None`.
+  2. При этом в `requirements.txt` (и `pyproject.toml`) библиотека `pypdf` **отсутствует**, а внутри контейнера `smart_bujet_backend_dev` вызов `import pypdf` падает с `ModuleNotFoundError: No module named 'pypdf'`.
+  3. Из-за этого `extract_and_redact_pdf_text` (`src/services/bank_statement_service.py:53-54`) **всегда** возвращает `("", True)` и на строке `:131` **в 100% случаев отправляет сырой PDF со всеми ПДн (ФИО, ИИН, IBAN, ФИО контрагентов) напрямую в Google Gemini**!
+  4. Более того, сама функция `extract_and_redact_pdf_text` (`:63-68`) маскирует только IBAN, карты и 12 цифр, но **не вызывает `PIIGuardrailService.mask_text()`** и **не маскирует ФИО владельца и ФИО контрагентов по P2P-переводам**.
+* **Что сделать:**
+  1. Добавить `pypdf>=4.0.0` в `requirements.txt` и `pyproject.toml`, пересобрать Docker-образ `smart_bujet_backend_dev` и убедиться, что `docker exec smart_bujet_backend_dev python -c "import pypdf"` выполняется без ошибок.
+  2. В `extract_and_redact_pdf_text` прогонять извлечённый текст через `PIIGuardrailService.mask_text(text, known_names=known_names)` и дополнительно маскировать регулярным выражением ФИО в строках переводов (вида `Фамилия И.` / `Имя О.` -> `[PERSON]`), а также подключить `ai_rate_limiter.check_and_record(user_id)` в `parse_single_statement` и фильтрацию внутренних переводов между своими счетами/депозитами в `STATEMENT_SYSTEM_PROMPT`.
+
+### 2.3. [CRITICAL BUG В DEV] Обычный `return` в `@router.message(F.document)` (`start.py:209-214`) всё ещё блокирует загрузку PDF-чеков!
+* **Где проблема:** В `src/bot/handlers/start.py:209-214` написано:
+  ```python
+  @router.message(F.document)
+  async def handle_statement_document(message: Message, session: AsyncSession) -> None:
+      user_id = message.from_user.id
+      if user_id not in STATEMENT_BUFFER:
+          return
+  ```
+* **Почему это не работает:** В `aiogram 3.x` декоратор `@router.message(F.document)` срабатывает на **любой** документ, а возврат `return` (`None`) из хэндлера сигнализирует диспетчеру, что событие обработано, и **останавливает дальнейший обход роутеров**. До `process_document_receipt` в `src/bot/handlers/photo_tx.py:143` обычные PDF-чеки никогда не доходят!
+* **Что сделать:** Вынести проверку `user_id in STATEMENT_BUFFER` непосредственно в фильтр декоратора:
+  ```python
+  @router.message(F.document, F.from_user.id.func(lambda uid: uid in STATEMENT_BUFFER))
+  ```
+  либо выбрасывать `raise SkipHandler()` (`from aiogram.dispatcher.event.bases import SkipHandler`).
+
+### 2.4. [FATAL CRASH В DEV] Падение `TypeError` при нажатии «Личная / Семейная сводка» в боте
+* **Где проблема:** В `src/services/ai_service.py:432-436` параметр метода `generate_financial_advice` переименовали из `facts` в `user_facts: list[str] | None = None` (под `report_scheduler.py`), но в `src/bot/handlers/summary.py:214` и `:242` оставили старый вызов:
+  ```python
+  advice = await ai_service.generate_financial_advice(summary, facts=user_facts)
+  ```
+* **Последствие:** При запросе сводки в Dev-боте происходит 100% падение `TypeError: AIService.generate_financial_advice() got an unexpected keyword argument 'facts'`.
+* **Что сделать:** В `src/bot/handlers/summary.py:214, 242` заменить `facts=user_facts` на `user_facts=user_facts` (а в `generate_financial_advice` и `classify_user_fact` также добавить вызов `PIIGuardrailService.mask_text` для `user_facts` и `ai_rate_limiter.check_and_record`).
+
+### 2.5. [CRITICAL — КЛЮЧИ ШИФРОВАНИЯ] В `.env` на сервере не заданы `DATA_ENCRYPTION_KEY` и `BLIND_INDEX_SECRET`
+* **Где проблема:** В `/home/ag_admin/smart-bujet/.env` и `/home/ag_admin/smart-bujet-dev/.env` переменные `DATA_ENCRYPTION_KEY` и `BLIND_INDEX_SECRET` отсутствуют. Из-за этого `src/core/security.py:48-53, 126-130` использует фоллбэк `hashlib.sha256(settings.bot_token.encode()).digest()`.
+* **Последствие:** Все данные в боевой БД `smart_bujet` сейчас зашифрованы производным от `BOT_TOKEN` ключом. Если когда-либо перевыпустить `BOT_TOKEN` в `@BotFather`, **вся база данных и все 144 алиаса станут нечитаемыми навсегда!**
+* **Что сделать:**
+  1. Вычислить текущий hex/base64 ключ `sha256(BOT_TOKEN)` и явно записать его в `DATA_ENCRYPTION_KEY` и `BLIND_INDEX_SECRET` в `/home/ag_admin/smart-bujet/.env` и `/home/ag_admin/smart-bujet-dev/.env`, чтобы отвязать шифрование БД от токена Telegram-бота без потери уже зашифрованных данных.
+  2. Убрать из `src/core/security.py:51` хардкод-фоллбэк `"smart_bujet_default_secure_vault_seed_2026"`.
+
+### 2.6. [HIGH — СЕРВЕР] Обход `ufw` через Docker (`0.0.0.0:5432` и `0.0.0.0:8200`) и приватный ключ бэкапов на сервере
+* **Где проблема:**
+  1. Контейнеры `postgres_dg_improve` (`0.0.0.0:5432`) и `hashicorp_vault` (`0.0.0.0:8200`) пробрасывают порты через цепочку `iptables DOCKER` **до** правил `ufw`. Из-за этого порт `8200` (`hashicorp_vault`) по-прежнему полностью открыт в интернет!
+  2. В `/home/ag_admin/.age/key.txt` на самом сервере лежит **приватный ключ** `AGE-SECRET-KEY-...` от бэкапов (в случае компрометации сервера атакующий расшифрует все бэкапы этим ключом).
+  3. Скрипт `/home/ag_admin/scripts/backup_smart_bujet.sh` с паролем от БД имеет права `0775` (доступен на чтение всем пользователям).
+* **Что сделать:**
+  1. Пересоздать контейнеры `postgres_dg_improve` и `hashicorp_vault` с биндингом портов строго на `127.0.0.1:5432:5432` и `127.0.0.1:8200:8200`.
+  2. В скрипте бэкапа использовать только публичный ключ (`age -r age1...`), а приватный ключ из `/home/ag_admin/.age/key.txt` сохранить локально у владельца и удалить с сервера.
+  3. Выполнить `chmod 700 /home/ag_admin/scripts/backup_smart_bujet.sh`.
+
+### 2.7. [MEDIUM — РЕГРЕССИИ В МОДЕЛЯХ, UI И ТЕСТАХ]
+1. **Пропал `@property def asset_currency` из `Transaction` (`src/models/transaction.py:60`):**
+   - При редактировании модели случайно удалили свойство `asset_currency`, из-за чего в MiniApp (`src/static/app.js:1744`) все переводы на вклады отображаются в `$ USD` вместо валюты счёта. Вернуть `@property def asset_currency(self) -> str | None: return self.asset_account.currency if self.asset_account else None` в Prod и Dev.
+2. **Дублирование хэндлеров в Prod `start.py`, пропуск в Dev `start.py` и отсутствие кнопки удаления в MiniApp:**
+   - В Prod (`src/bot/handlers/start.py:175-347`) функции `on_privacy_accept`, `cmd_delete_account`, `on_delete_cancel`, `on_delete_confirm` продублированы в файле дважды подряд — удалить дубликаты.
+   - В Dev (`src/bot/handlers/start.py`) перенести `on_privacy_accept` и `/delete_account`.
+   - Добавить кнопку **«🗑 Удалить аккаунт и все данные»** в интерфейс MiniApp (`src/static/index.html`, `src/static/app.js` -> `DELETE /api/v1/auth/me`).
+3. **Убрать оставшуюся запись `username` и починить сломанный тест:**
+   - В `src/bot/handlers/text_tx.py:40` (Prod и Dev) и `src/bot/handlers/start.py:112, 117` (Dev) заменить `username=message.from_user.username` на `username=None` и очистить `UPDATE users SET username = NULL;` в БД `smart_bujet_dev`.
+   - Обновить ассерт количества рядов кнопок в `tests/test_tx_toggle_and_learning.py:59` (`3` вместо `2` после добавления кнопки «📋 Вернуться в меню»).

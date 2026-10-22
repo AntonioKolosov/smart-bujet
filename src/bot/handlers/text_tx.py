@@ -37,7 +37,7 @@ async def process_text_transaction(message: Message, session: AsyncSession):
     if not user:
         user = User(
             id=message.from_user.id,
-            username=message.from_user.username,
+            username=None,
             first_name=message.from_user.first_name,
             currency="KZT"
         )

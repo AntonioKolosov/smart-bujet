@@ -126,7 +126,7 @@ async def cmd_start(message: Message, session: AsyncSession, command: CommandObj
         ])
         await message.answer(
             f"🛡 <b>Политика конфиденциальности и защита данных</b>\n\n"
-            f"Добро пожаловать в <b>Smart Буджет</b>! Перед началом работы ознакомьтесь с правилами безопасности:\n\n"
+            f"Добро пожаловать в <b>Smart Bujet</b>! Перед началом работы ознакомьтесь с правилами безопасности:\n\n"
             f"• 🔒 <b>Сквозное шифрование (AES-256-GCM):</b> названия ваших покупок, счетов и кредитов зашифрованы в базе данных.\n"
             f"• 🛡 <b>Guardrails-маскирование:</b> перед отправкой в AI имена, номера карт и телефоны обезличиваются.\n"
             f"• 🙈 <b>Слепота администратора:</b> ваш @username не сохраняется в базе данных.\n"
@@ -171,81 +171,6 @@ async def on_change_currency(callback: CallbackQuery):
     )
     await callback.answer()
 
-
-@router.callback_query(F.data == "privacy:accept")
-async def on_privacy_accept(callback: CallbackQuery, session: AsyncSession):
-    user = await session.scalar(select(User).where(User.id == callback.from_user.id))
-    if user:
-        user.has_accepted_terms = True
-        await session.commit()
-
-    if not user or user.initial_balance is None:
-        await callback.message.edit_text(
-            BotMessages.welcome_new(),
-            reply_markup=currency_keyboard()
-        )
-    else:
-        miniapp_url = get_miniapp_url()
-        await callback.message.edit_text(
-            f"✅ Условия конфиденциальности приняты!\n\n{BotMessages.welcome_back(user.first_name, user.currency, 0.0)}",
-            reply_markup=welcome_back_keyboard(miniapp_url=miniapp_url)
-        )
-    await callback.answer()
-
-
-@router.message(Command("delete_account"))
-async def cmd_delete_account(message: Message):
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Да, безвозвратно удалить всё", callback_data="act:delete:confirm")],
-        [InlineKeyboardButton(text="🔙 Отмена", callback_data="act:delete:cancel")]
-    ])
-    await message.answer(
-        "⚠️ <b>Внимание! Полное удаление аккаунта</b>\n\n"
-        "Вы действительно хотите безвозвратно удалить свой профиль и ВСЮ историю транзакций, счетов и кредитов?\n\n"
-        "Это действие невозможно отменить.",
-        reply_markup=confirm_kb
-    )
-
-
-@router.callback_query(F.data == "act:delete:cancel")
-async def on_delete_cancel(callback: CallbackQuery):
-    await callback.message.edit_text("Действие отменено.")
-    await callback.answer()
-
-
-@router.callback_query(F.data == "act:delete:confirm")
-async def on_delete_confirm(callback: CallbackQuery, session: AsyncSession):
-    user = await session.scalar(select(User).where(User.id == callback.from_user.id))
-    if not user:
-        await callback.message.edit_text("Аккаунт не найден.")
-        await callback.answer()
-        return
-
-    from src.models.family import FamilyGroup
-    if user.family_group_id:
-        family = await session.get(FamilyGroup, user.family_group_id)
-        if family and family.owner_id == user.id:
-            other_member = await session.scalar(
-                select(User).where(User.family_group_id == family.id, User.id != user.id)
-            )
-            if other_member:
-                family.owner_id = other_member.id
-                user.family_group_id = None
-                await session.flush()
-            else:
-                user.family_group_id = None
-                await session.flush()
-                await session.delete(family)
-                await session.flush()
-        else:
-            user.family_group_id = None
-            await session.flush()
-
-    await session.delete(user)
-    await session.commit()
-    await callback.message.edit_text("🗑 <b>Ваш аккаунт и все данные успешно и безвозвратно удалены.</b>\n\nЕсли захотите вернуться, просто отправьте /start.")
-    await callback.answer()
 
 @router.callback_query(F.data.startswith("currency_"))
 async def process_currency(callback: CallbackQuery, session: AsyncSession):
@@ -344,3 +269,5 @@ async def on_delete_confirm(callback: CallbackQuery, session: AsyncSession):
     await session.commit()
     await callback.message.edit_text("🗑 <b>Ваш аккаунт и все данные успешно и безвозвратно удалены.</b>\n\nЕсли захотите вернуться, просто отправьте /start.")
     await callback.answer()
+
+
