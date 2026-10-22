@@ -1257,6 +1257,7 @@ input[type="number"] {
   border-radius: 6px;
   font-weight: 600;
   white-space: nowrap;
+  margin-top: 3px;
 }
 .author-self { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
 .author-partner { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
