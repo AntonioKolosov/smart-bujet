@@ -4,9 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Smart Bujet — Журнал и Депозиты</title>
+  <!-- Preconnect to Telegram CDN -->
+  <link rel="preconnect" href="https://telegram.org">
+  <link rel="dns-prefetch" href="https://telegram.org">
+  <link rel="stylesheet" href="/static/styles.css?v=2.24">
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="/static/styles.css?v=2.23">
 </head>
 <body>
   <div id="app" class="container">
@@ -34,17 +37,17 @@
       <div id="opsPersonalView">
         <div class="header-balance-card">
           <span class="balance-label">Текущий баланс</span>
-          <span class="balance-value" id="currentBalance">0 ₸</span>
+          <span class="balance-value" id="currentBalance">—</span>
         </div>
 
         <div class="header-summary">
           <div class="summary-card">
             <span class="summary-label" id="expensePeriodLabel">Расход за месяц</span>
-            <span class="summary-value expense" id="totalExpense">0 ₸</span>
+            <span class="summary-value expense" id="totalExpense">—</span>
           </div>
           <div class="summary-card">
             <span class="summary-label" id="incomePeriodLabel">Доход за месяц</span>
-            <span class="summary-value income" id="totalIncome">0 ₸</span>
+            <span class="summary-value income" id="totalIncome">—</span>
           </div>
         </div>
 
@@ -714,6 +717,6 @@
     </button>
   </nav>
 
-  <script src="/static/app.js?v=2.23"></script>
+  <script src="/static/app.js?v=2.24"></script>
 </body>
 </html>

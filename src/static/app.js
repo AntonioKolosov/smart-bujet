@@ -395,7 +395,85 @@
   if (navAnalyticsBtn) navAnalyticsBtn.addEventListener('click', () => switchTab('tab-analytics'));
   if (navFactsBtn) navFactsBtn.addEventListener('click', () => switchTab('tab-facts'));
 
+  // --- LocalStorage SWR Hydration (0 ms First Contentful Paint) ---
+  function getUserId() {
+    try {
+      const initData = getInitData();
+      if (initData) {
+        const params = new URLSearchParams(initData);
+        const userJson = params.get('user');
+        if (userJson) {
+          const userObj = JSON.parse(userJson);
+          if (userObj.id) return String(userObj.id);
+        }
+      }
+      if (tg?.initDataUnsafe?.user?.id) {
+        return String(tg.initDataUnsafe.user.id);
+      }
+    } catch (_) {}
+    return 'default';
+  }
+
+  function safeGetStorage(key) {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        return window.localStorage.getItem(key);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function safeSetStorage(key, val) {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(key, val);
+      }
+    } catch (_) {}
+  }
+
+  function hydrateFromLocalStorage() {
+    const uid = getUserId();
+    try {
+      const rawProfile = safeGetStorage('sb_cached_profile_' + uid);
+      if (rawProfile) {
+        const data = JSON.parse(rawProfile);
+        userCurrency = data.currency || 'KZT';
+        currencySymbol = CURRENCY_SYMBOLS[userCurrency] || userCurrency;
+        if (data.first_name) userGreetingEl.textContent = `Привет, ${data.first_name}!`;
+        if (currencyBadgeEl) {
+          currencyBadgeEl.textContent = `${currencySymbol} ${userCurrency}`;
+        }
+        if (typeof updateSettingsCurrencyUI === 'function') {
+          updateSettingsCurrencyUI(userCurrency);
+        }
+        userLiquidBalance = Number(data.current_balance || 0);
+        currentBalanceEl.textContent = formatMoney(userLiquidBalance);
+        totalExpenseEl.textContent = formatMoney(data.month_expense || 0);
+        totalIncomeEl.textContent = formatMoney(data.month_income || 0);
+        if (data.month_period_name) {
+          expensePeriodLabelEl.textContent = `Расход (${data.month_period_name.toLowerCase()})`;
+          incomePeriodLabelEl.textContent = `Доход (${data.month_period_name.toLowerCase()})`;
+        }
+      }
+
+      const rawTxs = safeGetStorage('sb_cached_txs_' + uid);
+      if (rawTxs) {
+        const txs = JSON.parse(rawTxs);
+        if (Array.isArray(txs) && txs.length > 0) {
+          renderTransactions(txs, false);
+          loaderEl.classList.add('hidden');
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage hydration error:', e);
+    }
+  }
+
   // --- Data Fetching ---
+  let currentTxOffset = 0;
+  const TX_LIMIT = 30;
+  let isFetchingTx = false;
+
   async function fetchProfile() {
     try {
       const res = await fetch('/api/v1/auth/me', { headers: getHeaders() });
@@ -422,6 +500,11 @@
           expensePeriodLabelEl.textContent = `Расход (${data.month_period_name.toLowerCase()})`;
           incomePeriodLabelEl.textContent = `Доход (${data.month_period_name.toLowerCase()})`;
         }
+
+        try {
+          const uid = getUserId();
+          safeSetStorage('sb_cached_profile_' + uid, JSON.stringify(data));
+        } catch (_) {}
       }
     } catch (e) {
       if (currencyBadgeEl) {
@@ -430,14 +513,45 @@
     }
   }
 
-  async function fetchTransactions() {
-    loaderEl.classList.remove('hidden');
-    errorEl.classList.add('hidden');
-    emptyEl.classList.add('hidden');
-    txListEl.innerHTML = '';
+  function attachLoadMoreButton(hasMore) {
+    const existing = document.getElementById('txLoadMoreContainer');
+    if (existing) existing.remove();
+    if (!hasMore) return;
+
+    const container = document.createElement('div');
+    container.id = 'txLoadMoreContainer';
+    container.className = 'load-more-container';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'load-more-btn';
+    btn.textContent = 'Показать ещё';
+    btn.addEventListener('click', () => {
+      btn.textContent = 'Загрузка...';
+      btn.disabled = true;
+      fetchTransactions(true);
+    });
+
+    container.appendChild(btn);
+    txListEl.appendChild(container);
+  }
+
+  async function fetchTransactions(loadMore = false) {
+    if (isFetchingTx) return;
+    isFetchingTx = true;
+
+    if (!loadMore) {
+      currentTxOffset = 0;
+      // If transactions were not yet hydrated from cache, show loader
+      if (txListEl && (!txListEl.children || txListEl.children.length === 0)) {
+        loaderEl.classList.remove('hidden');
+      }
+      errorEl.classList.add('hidden');
+      emptyEl.classList.add('hidden');
+    }
 
     try {
-      const res = await fetch('/api/v1/transactions/?limit=100', { headers: getHeaders() });
+      const res = await fetch(`/api/v1/transactions/?limit=${TX_LIMIT}&offset=${currentTxOffset}`, { headers: getHeaders() });
       if (!res.ok) {
         if (res.status === 401) {
           throw new Error('Требуется авторизация через Telegram MiniApp.');
@@ -445,19 +559,39 @@
         throw new Error(`Ошибка загрузки данных (${res.status})`);
       }
       const transactions = await res.json();
-      renderTransactions(transactions);
+      currentTxOffset += transactions.length;
+
+      if (!loadMore) {
+        txListEl.innerHTML = '';
+        try {
+          const uid = getUserId();
+          safeSetStorage('sb_cached_txs_' + uid, JSON.stringify(transactions));
+        } catch (_) {}
+      }
+
+      renderTransactions(transactions, loadMore);
+      attachLoadMoreButton(transactions.length === TX_LIMIT);
     } catch (err) {
-      errorEl.textContent = err.message || 'Не удалось загрузить транзакции';
-      errorEl.classList.remove('hidden');
+      if (!loadMore) {
+        errorEl.textContent = err.message || 'Не удалось загрузить транзакции';
+        errorEl.classList.remove('hidden');
+      }
     } finally {
       loaderEl.classList.add('hidden');
+      isFetchingTx = false;
     }
   }
 
-  function renderTransactions(transactions) {
-    if (!transactions || transactions.length === 0) {
-      emptyEl.classList.remove('hidden');
-      return;
+  function renderTransactions(transactions, append = false) {
+    if (!append) {
+      if (!transactions || transactions.length === 0) {
+        emptyEl.classList.remove('hidden');
+        txListEl.innerHTML = '';
+        return;
+      }
+      emptyEl.classList.add('hidden');
+    } else {
+      if (!transactions || transactions.length === 0) return;
     }
 
     const groups = {};
@@ -472,10 +606,15 @@
     const fragment = document.createDocumentFragment();
 
     Object.keys(groups).forEach(dateTitle => {
-      const divider = document.createElement('div');
-      divider.className = 'date-divider';
-      divider.textContent = dateTitle;
-      fragment.appendChild(divider);
+      const existingDividers = txListEl.querySelectorAll('.date-divider');
+      const lastDivider = existingDividers.length > 0 ? existingDividers[existingDividers.length - 1] : null;
+
+      if (!append || !lastDivider || lastDivider.textContent !== dateTitle) {
+        const divider = document.createElement('div');
+        divider.className = 'date-divider';
+        divider.textContent = dateTitle;
+        fragment.appendChild(divider);
+      }
 
       groups[dateTitle].forEach(tx => {
         const card = document.createElement('div');
@@ -2443,6 +2582,9 @@
     switchTab('tab-operations');
   }
 
-  // Always load user profile
+  // Hydrate immediately from instant LocalStorage cache (0 ms)
+  hydrateFromLocalStorage();
+
+  // Always load live user profile
   fetchProfile();
 })();

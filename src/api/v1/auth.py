@@ -44,7 +44,7 @@ async def get_me(
     session: AsyncSession = Depends(get_db)
 ):
     tx_service = TransactionService(session)
-    bal_data = await tx_service.get_user_balance(current_user.id)
+    bal_data = await tx_service.get_user_balance(current_user.id, user=current_user)
     return {
         "id": current_user.id,
         "username": current_user.username,

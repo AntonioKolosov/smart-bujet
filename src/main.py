@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from starlette.middleware.gzip import GZipMiddleware
+from starlette.responses import Response
 from aiogram.types import MenuButtonWebApp, WebAppInfo, BotCommand
 from sqlalchemy import text
 from src.core.config import settings
@@ -113,14 +115,22 @@ async def lifespan(app: FastAPI):
         await bot.delete_webhook()
     await engine.dispose()
 
+class CachedStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
 app = FastAPI(title="Smart Bujet API", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.include_router(api_router, prefix="/api/v1")
 
 # Mount MiniApp static assets
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    app.mount("/static", CachedStaticFiles(directory=static_dir), name="static")
 
     @app.get("/app", include_in_schema=False)
     @app.get("/", include_in_schema=False)
