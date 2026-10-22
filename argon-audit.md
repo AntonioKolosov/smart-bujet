@@ -474,3 +474,75 @@
 3. **Убрать оставшуюся запись `username` и починить сломанный тест:**
    - В `src/bot/handlers/text_tx.py:40` (Prod и Dev) и `src/bot/handlers/start.py:112, 117` (Dev) заменить `username=message.from_user.username` на `username=None` и очистить `UPDATE users SET username = NULL;` в БД `smart_bujet_dev`.
    - Обновить ассерт количества рядов кнопок в `tests/test_tx_toggle_and_learning.py:59` (`3` вместо `2` после добавления кнопки «📋 Вернуться в меню»).
+
+
+---
+
+# Пятый аудит (Re-Audit #5: Prod `9779694` + Dev `cc018f0`)
+
+Дата проверки: `2026-10-22`
+Проверенные коммиты:
+- **Prod (`C:\Users\aanto\smart-bujet` и `/home/ag_admin/smart-bujet`):** `9779694`
+- **Dev (`C:\Users\aanto\smart-bujet-dev` и `/home/ag_admin/smart-bujet-dev`):** `cc018f0`
+- **Боевой сервер `85.198.89.188`:** контейнеры `smart_bujet_backend`, `smart_bujet_backend_dev`, `postgres_dg_improve` (базы `smart_bujet` и `smart_bujet_dev`), `hashicorp_vault`.
+
+---
+
+## 1. Что полностью закрыто и подтверждено на живом сервере (~95% объёма) ✅
+
+1. **[Пункт 2.1] `ENUM transactionsource` обновлён в обеих БД и в `src/main.py`:**
+   - В живых БД `smart_bujet` и `smart_bujet_dev` запрос `SELECT enum_range(NULL::transactionsource);` возвращает `{text,voice,photo,manual,statement}`.
+   - В `src/main.py:28-29` (Prod и Dev) добавлена автоматическая проверка `ALTER TYPE transactionsource ADD VALUE IF NOT EXISTS 'statement';`.
+2. **[Пункт 2.2] Библиотека `pypdf` установлена в контейнерах, добавлены регулярки ПДн, `AIRateLimiter` и фильтр переводов в выписках:**
+   - В `pyproject.toml:16` добавлен `"pypdf>=4.0.0"`, внутри обоих живых контейнеров (`smart_bujet_backend` и `smart_bujet_backend_dev`) установлен и работает `pypdf 6.21.2`.
+   - В `BankStatementService` (`src/services/bank_statement_service.py:67-131`) добавлены регулярные выражения для маскирования IBAN, номеров карт, 12-значных ИИН и ФИО контрагентов (`Перевод Фамилия И. О.`), подключён `ai_rate_limiter.check_and_record(user_id)` и правило исключения внутренних переводов между своими счетами/депозитами.
+3. **[Пункт 2.3] PDF-чеки больше не блокируются роутером `start.py`:**
+   - В `smart-bujet-dev/src/bot/handlers/start.py:225` условие перенесено в декоратор `@router.message(F.document, F.from_user.id.func(lambda uid: uid in STATEMENT_BUFFER))`. Обычные PDF-чеки беспрепятственно проходят в `photo_tx.py`.
+4. **[Пункт 2.4] Устранён краш `TypeError` при запросе ИИ-сводки в Dev-боте:**
+   - В `smart-bujet-dev/src/bot/handlers/summary.py:226-230, 252-256` вызов `generate_financial_advice` передаёт корректные аргументы `user_id=user.id, user_facts=fact_texts`.
+5. **[Пункт 2.5] Ключи `DATA_ENCRYPTION_KEY` и `BLIND_INDEX_SECRET` прописаны в `.env`, БД расшифровывается на 100%:**
+   - Из `src/core/security.py:48-53` удалён хардкод-фоллбэк `"smart_bujet_default_secure_vault_seed_2026"`.
+   - В `/home/ag_admin/smart-bujet/.env` и `/home/ag_admin/smart-bujet-dev/.env` прописаны `DATA_ENCRYPTION_KEY` и `BLIND_INDEX_SECRET`, на 100% совпадающие с ключами, которыми зашифрованы записи в БД.
+   - Живая проверка ORM-запросов внутри обоих контейнеров подтвердила: **100% записей (`users`, `transactions`, `asset_accounts`, `credit_accounts`) расшифровываются без единой ошибки**.
+6. **[Пункт 2.6] Порты Docker закрыты на `127.0.0.1`, приватный ключ бэкапов удалён с сервера:**
+   - `postgres_dg_improve` слушает только `127.0.0.1:5432` и `172.17.0.1:5432` (`0.0.0.0:5432` закрыт).
+   - `hashicorp_vault` слушает только `127.0.0.1:8200` (`0.0.0.0:8200` закрыт).
+   - Приватный ключ `/home/ag_admin/.age/key.txt` удалён с сервера и сохранён локально у владельца в `C:\Users\aanto\code-vault\smart_bujet_backup_age_secret_key.txt`.
+   - Права `/home/ag_admin/scripts/backup_smart_bujet.sh` изменены на `0700` (`-rwx------`), ночной бэкап от `03:00` успешно создан с использованием только публичного ключа.
+7. **[Пункт 2.7] Восстановлен `asset_currency`, очищен `username`, убраны дубли в `start.py`:**
+   - `@property def asset_currency` возвращён в `src/models/transaction.py:64-66` (Prod и Dev).
+   - Дублирующие функции в Prod `src/bot/handlers/start.py` удалены, а в Dev `src/bot/handlers/start.py` добавлены `privacy:accept` и `/delete_account`.
+   - Запись `username` отключена в коде (`username=None`) и очищена в живой БД `smart_bujet_dev`.
+   - В Dev MiniApp (`src/static/index.html:327-331`, `src/static/app.js:2314-2351`) добавлена кнопка `btnMiniAppDeleteAccount`, вызывающая `DELETE /api/v1/auth/me`.
+
+---
+
+## 2. Финальные 4 штриха до 100% готовности ⚠️
+
+1. **[Опечатка в импорте `PIIGuardrailService` в `bank_statement_service.py:78` (Dev)]**:
+   - В `smart-bujet-dev/src/services/bank_statement_service.py:77-81` написано:
+     ```python
+     try:
+         from src.services.pii_guardrail import PIIGuardrailService
+         text_content, _ = PIIGuardrailService.mask_text(text_content, known_names=known_names)
+     except Exception:
+         pass
+     ```
+   - Файл в проекте называется **`src/services/pii_guardrail_service.py`**, а не `src/services/pii_guardrail.py`! Из-за `except Exception: pass` ошибка `ModuleNotFoundError` молча проглатывается, и `PIIGuardrailService.mask_text` (маскирование `known_names` и телефонов) никогда не вызывается.
+   - **Что сделать:** Исправить импорт на `from src.services.pii_guardrail_service import PIIGuardrailService`, а также добавить вызов `PIIGuardrailService.mask_text` для `user_facts` в `smart-bujet-dev/src/services/ai_service.py:474, 589` и `ai_rate_limiter.check_and_record(user_id)` в `classify_user_fact`.
+2. **[Пересоздать контейнеры бэкенда на сервере через `--force-recreate`]**:
+   - После добавления `DATA_ENCRYPTION_KEY` и `BLIND_INDEX_SECRET` в `.env` контейнеры `smart_bujet_backend` и `smart_bujet_backend_dev` были перезапущены через `docker restart`, который не перечитывает `.env` в `os.environ` контейнера.
+   - **Что сделать:** Выполнить на сервере:
+     ```bash
+     cd /home/ag_admin/smart-bujet && docker compose up -d --force-recreate
+     cd /home/ag_admin/smart-bujet-dev && docker compose up -d --force-recreate
+     ```
+3. **[Кнопка удаления аккаунта в Prod MiniApp (`smart-bujet`)]**:
+   - В Dev MiniApp кнопку `btnMiniAppDeleteAccount` поместили внутрь вкладки «🧠 Память» (`tab-facts`), которой нет в Prod MiniApp (`smart-bujet/src/static/index.html`).
+   - **Что сделать:** Добавить блок «⚠️ Опасная зона» с кнопкой `btnMiniAppDeleteAccount` и обработчиком `DELETE /api/v1/auth/me` также и в Prod MiniApp (например, внизу вкладки «📊 Аналитика» в `smart-bujet/src/static/index.html` и `smart-bujet/src/static/app.js`).
+4. **[Починить 3 юнит-теста при локальном запуске без `.env`]**:
+   - После удаления фоллбэка в `blind_index()` (`src/core/security.py:129-130`) при локальном прогоне `pytest` / `unittest` без заданного `BLIND_INDEX_SECRET` падают 3 теста с `RuntimeError: BLIND_INDEX_SECRET is required for blind indexing`:
+     - `tests/test_currency_exchange.py:159` (`test_transaction_service_auto_scales_and_resolves_asset`)
+     - `tests/test_tx_toggle_and_learning.py:81` (`test_sanitize_poisoned_aliases`)
+     - `tests/test_user_improvements_batch.py:110` (`test_transaction_service_auto_fills_monthly_payment_if_amount_zero`)
+   - **Что сделать:** Задать в `setUp()` этих тестов (или в `src/core/config.py` / `conftest.py` для тестового окружения) тестовое значение `settings.blind_index_secret = "test_blind_index_secret_2026"`, чтобы все 122 теста проходили на 100%.

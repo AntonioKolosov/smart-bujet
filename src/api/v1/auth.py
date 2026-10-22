@@ -61,6 +61,28 @@ async def get_me(
     }
 
 
+class UpdateCurrencyRequest(BaseModel):
+    currency: str
+
+
+@router.patch("/me/currency")
+async def update_my_currency(
+    data: UpdateCurrencyRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    cur = data.currency.upper().strip()
+    if cur not in {"KZT", "RUB", "USD", "EUR"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Поддерживаемые валюты: KZT, RUB, USD, EUR"
+        )
+    current_user.currency = cur
+    await session.commit()
+    return {"status": "ok", "currency": cur}
+
+
+
 from sqlalchemy import select
 from src.models.family import FamilyGroup
 

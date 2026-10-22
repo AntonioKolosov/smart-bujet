@@ -2033,6 +2033,214 @@
     }
   });
 
+  // Settings Modal & Currency Management
+  const settingsBtn = document.getElementById('settingsBtn');
+  const settingsModal = document.getElementById('settingsModal');
+  const closeSettingsModalBtn = document.getElementById('closeSettingsModalBtn');
+
+  function updateSettingsCurrencyUI(curr) {
+    if (!curr) return;
+    const btns = document.querySelectorAll('.currency-pill-btn');
+    btns.forEach(btn => {
+      if (btn.getAttribute('data-currency') === curr) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+  }
+
+  if (settingsBtn && settingsModal) {
+    settingsBtn.addEventListener('click', () => {
+      updateSettingsCurrencyUI(userCurrency);
+      settingsModal.classList.remove('hidden');
+    });
+  }
+
+  if (closeSettingsModalBtn && settingsModal) {
+    closeSettingsModalBtn.addEventListener('click', () => {
+      settingsModal.classList.add('hidden');
+    });
+    settingsModal.addEventListener('click', (e) => {
+      if (e.target === settingsModal) {
+        settingsModal.classList.add('hidden');
+      }
+    });
+  }
+
+  document.querySelectorAll('.currency-pill-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const newCurr = btn.getAttribute('data-currency');
+      if (!newCurr || newCurr === userCurrency) return;
+      try {
+        const initData = getInitData();
+        const res = await fetch('/api/v1/auth/me/currency', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Telegram-Init-Data': initData
+          },
+          body: JSON.stringify({ currency: newCurr })
+        });
+        if (res.ok) {
+          userCurrency = newCurr;
+          currencySymbol = CURRENCY_SYMBOLS[userCurrency] || userCurrency;
+          updateSettingsCurrencyUI(userCurrency);
+          await Promise.all([fetchProfile(), fetchTransactions()]);
+        } else {
+          const err = await res.json().catch(() => ({}));
+          alert(err.detail || 'Не удалось сменить валюту');
+        }
+      } catch (e) {
+        alert('Ошибка соединения при смене валюты');
+      }
+    });
+  });
+
+  // Account deletion button handler
+  const btnMiniAppDeleteAccount = document.getElementById('btnMiniAppDeleteAccount');
+  if (btnMiniAppDeleteAccount) {
+    btnMiniAppDeleteAccount.addEventListener('click', async () => {
+      const confirmMsg = 'Вы уверены, что хотите безвозвратно удалить свой аккаунт и ВСЕ финансовые данные?';
+      const doDelete = async () => {
+        try {
+          const initData = getInitData();
+          const res = await fetch('/api/v1/auth/me', {
+            method: 'DELETE',
+            headers: { 'X-Telegram-Init-Data': initData }
+          });
+          if (res.ok) {
+            alert('Ваш аккаунт и все данные успешно удалены.');
+            if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.close) {
+              window.Telegram.WebApp.close();
+            } else {
+              window.location.reload();
+            }
+          } else {
+            const err = await res.json().catch(() => ({}));
+            alert(err.detail || 'Не удалось удалить аккаунт');
+          }
+        } catch (e) {
+          alert('Ошибка сети при удалении аккаунта');
+        }
+      };
+
+      if (window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.showConfirm === 'function') {
+        window.Telegram.WebApp.showConfirm(confirmMsg, (confirmed) => {
+          if (confirmed) doDelete();
+        });
+      } else {
+        if (confirm(confirmMsg)) {
+          await doDelete();
+        }
+      }
+    });
+  }
+
+  // Settings Modal & Currency Management
+  const settingsBtn = document.getElementById('settingsBtn');
+  const settingsModal = document.getElementById('settingsModal');
+  const closeSettingsModalBtn = document.getElementById('closeSettingsModalBtn');
+
+  function updateSettingsCurrencyUI(curr) {
+    if (!curr) return;
+    const btns = document.querySelectorAll('.currency-pill-btn');
+    btns.forEach(btn => {
+      if (btn.getAttribute('data-currency') === curr) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+  }
+
+  if (settingsBtn && settingsModal) {
+    settingsBtn.addEventListener('click', () => {
+      updateSettingsCurrencyUI(userCurrency);
+      settingsModal.classList.remove('hidden');
+    });
+  }
+
+  if (closeSettingsModalBtn && settingsModal) {
+    closeSettingsModalBtn.addEventListener('click', () => {
+      settingsModal.classList.add('hidden');
+    });
+    settingsModal.addEventListener('click', (e) => {
+      if (e.target === settingsModal) {
+        settingsModal.classList.add('hidden');
+      }
+    });
+  }
+
+  document.querySelectorAll('.currency-pill-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const newCurr = btn.getAttribute('data-currency');
+      if (!newCurr || newCurr === userCurrency) return;
+      try {
+        const initData = getInitData();
+        const res = await fetch('/api/v1/auth/me/currency', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Telegram-Init-Data': initData
+          },
+          body: JSON.stringify({ currency: newCurr })
+        });
+        if (res.ok) {
+          userCurrency = newCurr;
+          currencySymbol = CURRENCY_SYMBOLS[userCurrency] || userCurrency;
+          updateSettingsCurrencyUI(userCurrency);
+          await Promise.all([fetchProfile(), fetchTransactions()]);
+        } else {
+          const err = await res.json().catch(() => ({}));
+          alert(err.detail || 'Не удалось сменить валюту');
+        }
+      } catch (e) {
+        alert('Ошибка соединения при смене валюты');
+      }
+    });
+  });
+
+  // Account deletion button handler
+  const btnMiniAppDeleteAccount = document.getElementById('btnMiniAppDeleteAccount');
+  if (btnMiniAppDeleteAccount) {
+    btnMiniAppDeleteAccount.addEventListener('click', async () => {
+      const confirmMsg = 'Вы уверены, что хотите безвозвратно удалить свой аккаунт и ВСЕ финансовые данные?';
+      const doDelete = async () => {
+        try {
+          const initData = getInitData();
+          const res = await fetch('/api/v1/auth/me', {
+            method: 'DELETE',
+            headers: { 'X-Telegram-Init-Data': initData }
+          });
+          if (res.ok) {
+            alert('Ваш аккаунт и все данные успешно удалены.');
+            if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.close) {
+              window.Telegram.WebApp.close();
+            } else {
+              window.location.reload();
+            }
+          } else {
+            const err = await res.json().catch(() => ({}));
+            alert(err.detail || 'Не удалось удалить аккаунт');
+          }
+        } catch (e) {
+          alert('Ошибка сети при удалении аккаунта');
+        }
+      };
+
+      if (window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.showConfirm === 'function') {
+        window.Telegram.WebApp.showConfirm(confirmMsg, (confirmed) => {
+          if (confirmed) doDelete();
+        });
+      } else {
+        if (confirm(confirmMsg)) {
+          await doDelete();
+        }
+      }
+    });
+  }
+
   // Check URL params for deep linking (e.g. ?page=deposits, ?page=family, ?page=credits, ?page=analytics)
   const urlParams = new URLSearchParams(window.location.search);
   const initialPage = (urlParams.get('page') || window.location.hash.replace('#', '') || '').toLowerCase();
