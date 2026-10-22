@@ -404,7 +404,10 @@
         userCurrency = data.currency || 'KZT';
         currencySymbol = CURRENCY_SYMBOLS[userCurrency] || userCurrency;
         userGreetingEl.textContent = data.first_name ? `Привет, ${data.first_name}!` : 'Smart Bujet';
-        currencyBadgeEl.textContent = `${currencySymbol} ${userCurrency}`;
+        if (currencyBadgeEl) {
+          currencyBadgeEl.textContent = `${currencySymbol} ${userCurrency}`;
+        }
+        updateSettingsCurrencyUI(userCurrency);
 
         userLiquidBalance = Number(data.current_balance || 0);
         currentBalanceEl.textContent = formatMoney(userLiquidBalance);
@@ -419,7 +422,9 @@
         }
       }
     } catch (e) {
-      currencyBadgeEl.textContent = `${currencySymbol} ${userCurrency}`;
+      if (currencyBadgeEl) {
+        currencyBadgeEl.textContent = `${currencySymbol} ${userCurrency}`;
+      }
     }
   }
 
@@ -2304,11 +2309,69 @@
     });
   }
 
-  // Header facts button shortcut
-  const btnHeaderFacts = document.getElementById('btnHeaderFacts');
-  if (btnHeaderFacts) {
-    btnHeaderFacts.addEventListener('click', () => switchTab('tab-facts'));
+  // Settings Modal & Currency Management
+  const settingsBtn = document.getElementById('settingsBtn');
+  const settingsModal = document.getElementById('settingsModal');
+  const closeSettingsModalBtn = document.getElementById('closeSettingsModalBtn');
+
+  function updateSettingsCurrencyUI(curr) {
+    if (!curr) return;
+    const btns = document.querySelectorAll('.currency-pill-btn');
+    btns.forEach(btn => {
+      if (btn.getAttribute('data-currency') === curr) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
   }
+
+  if (settingsBtn && settingsModal) {
+    settingsBtn.addEventListener('click', () => {
+      updateSettingsCurrencyUI(userCurrency);
+      settingsModal.classList.remove('hidden');
+    });
+  }
+
+  if (closeSettingsModalBtn && settingsModal) {
+    closeSettingsModalBtn.addEventListener('click', () => {
+      settingsModal.classList.add('hidden');
+    });
+    settingsModal.addEventListener('click', (e) => {
+      if (e.target === settingsModal) {
+        settingsModal.classList.add('hidden');
+      }
+    });
+  }
+
+  document.querySelectorAll('.currency-pill-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const newCurr = btn.getAttribute('data-currency');
+      if (!newCurr || newCurr === userCurrency) return;
+      try {
+        const initData = getInitData();
+        const res = await fetch('/api/v1/auth/me/currency', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Telegram-Init-Data': initData
+          },
+          body: JSON.stringify({ currency: newCurr })
+        });
+        if (res.ok) {
+          userCurrency = newCurr;
+          currencySymbol = CURRENCY_SYMBOLS[userCurrency] || userCurrency;
+          updateSettingsCurrencyUI(userCurrency);
+          await Promise.all([fetchProfile(), fetchTransactions()]);
+        } else {
+          const err = await res.json().catch(() => ({}));
+          alert(err.detail || 'Не удалось сменить валюту');
+        }
+      } catch (e) {
+        alert('Ошибка соединения при смене валюты');
+      }
+    });
+  });
 
   // Account deletion button handler
   const btnMiniAppDeleteAccount = document.getElementById('btnMiniAppDeleteAccount');

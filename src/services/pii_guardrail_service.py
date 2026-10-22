@@ -101,11 +101,13 @@ class PIIGuardrailService:
     def mask_text(
         cls,
         text: str,
-        session: MaskingSession,
+        session: MaskingSession | None = None,
         known_names: list[str] | None = None
     ) -> str:
         if not text:
             return text
+        if session is None:
+            session = cls.create_session()
 
         masked = text
 

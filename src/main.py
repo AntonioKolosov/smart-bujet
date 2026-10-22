@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
 
             await bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(
-                    text="Smart Bujet",
+                    text="Menu",
                     web_app=WebAppInfo(url=miniapp_url)
                 )
             )

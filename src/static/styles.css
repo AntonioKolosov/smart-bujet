@@ -1012,24 +1012,44 @@ input[type="number"] {
   letter-spacing: -0.2px;
 }
 
-.header-facts-btn {
-  background: rgba(56, 189, 248, 0.12);
-  color: var(--link-color, #38bdf8);
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  border-radius: 10px;
-  padding: 6px 10px;
-  font-size: 0.78rem;
-  font-weight: 600;
+.settings-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--text-color);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
   transition: all 0.2s ease;
 }
 
-.header-facts-btn:active {
-  transform: scale(0.97);
-  background: rgba(56, 189, 248, 0.22);
+.settings-btn:active {
+  transform: scale(0.95);
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.currency-pill-btn {
+  background: var(--secondary-bg-color, #1e293b);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  color: var(--text-color, #f8fafc);
+  padding: 10px 4px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.currency-pill-btn:hover,
+.currency-pill-btn.active {
+  background: var(--button-color, #2563eb);
+  border-color: var(--button-color, #2563eb);
+  color: #ffffff;
 }
 
 .danger-zone-card {

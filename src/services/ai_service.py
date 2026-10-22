@@ -473,7 +473,8 @@ class AIService:
 
         facts_block = ""
         if user_facts:
-            facts_block = "\nПЕРСОНАЛЬНЫЙ КОНТЕКСТ И ФАКТЫ О ПОЛЬЗОВАТЕЛЕ (цели, привычки, расписание):\n" + "\n".join(f"- {f}" for f in user_facts) + "\nУчитывай эти цели и привычки в рекомендациях.\n"
+            masked_facts = [PIIGuardrailService.mask_text(f) for f in user_facts]
+            facts_block = "\nПЕРСОНАЛЬНЫЙ КОНТЕКСТ И ФАКТЫ О ПОЛЬЗОВАТЕЛЕ (цели, привычки, расписание):\n" + "\n".join(f"- {f}" for f in masked_facts) + "\nУчитывай эти цели и привычки в рекомендациях.\n"
 
         prompt = (
             "Ты — персональный финансовый консультант Smart Bujet.\n"
@@ -586,7 +587,7 @@ class AIService:
             cat = "other"
         return {"category": cat}
 
-    async def classify_user_fact(self, text: str) -> dict[str, str]:
+    async def classify_user_fact(self, text: str, user_id: int | None = None) -> dict[str, str]:
         """
         Classifies user memory fact into one of: 'goal', 'habit', 'schedule', 'constraint', 'other'.
         Uses Gemini with strict JSON output or keyword heuristics fallback.
@@ -594,9 +595,15 @@ class AIService:
         rule_res = self._classify_fact_rule_based(text)
         cat = rule_res["category"]
 
+        if user_id is not None:
+            allowed, _ = ai_rate_limiter.check_and_record(user_id)
+            if not allowed:
+                return {"category": cat}
+
         if not self.client:
             return {"category": cat}
 
+        masked_text = PIIGuardrailService.mask_text(text)
         prompt = (
             "Определи категорию персонального факта пользователя для финансового ассистента.\n"
             "Доступные категории:\n"
@@ -605,7 +612,7 @@ class AIService:
             "- 'schedule' (расписание поступлений или списаний: зарплата 5-го числа, аренда 1-го)\n"
             "- 'constraint' (бюджетное правило, ограничение: не тратить больше 50к на кафе)\n"
             "- 'other' (общая заметка)\n\n"
-            f"Текст: \"{text}\"\n\n"
+            f"Текст: \"{masked_text}\"\n\n"
             "Верни СТРОГО JSON: {\"category\": \"goal|habit|schedule|constraint|other\"}"
         )
         try:

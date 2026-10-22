@@ -75,8 +75,8 @@ def extract_and_redact_pdf_text(
 
         # Apply PIIGuardrailService mask if available
         try:
-            from src.services.pii_guardrail import PIIGuardrailService
-            text_content, _ = PIIGuardrailService.mask_text(text_content, known_names=known_names)
+            from src.services.pii_guardrail_service import PIIGuardrailService
+            text_content = PIIGuardrailService.mask_text(text_content, known_names=known_names)
         except Exception:
             pass
 

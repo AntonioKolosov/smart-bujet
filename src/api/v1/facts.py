@@ -71,7 +71,7 @@ async def create_fact(
     valid_cats = {c.value for c in FactCategory}
     if not cat or cat not in valid_cats:
         ai_service = AIService()
-        ai_res = await ai_service.classify_user_fact(clean_text)
+        ai_res = await ai_service.classify_user_fact(clean_text, user_id=current_user.id)
         cat = ai_res.get("category", FactCategory.other.value)
         if cat not in valid_cats:
             cat = FactCategory.other.value
