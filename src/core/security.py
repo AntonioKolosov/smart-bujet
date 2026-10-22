@@ -48,9 +48,9 @@ def validate_init_data(init_data: str, bot_token: str) -> dict | None:
 def _get_encryption_key() -> bytes:
     key_str = (settings.data_encryption_key or "").strip()
     if not key_str:
-        # Deterministic derivation from bot token or secret fallback so tests run reliably
-        seed = (settings.bot_token or "smart_bujet_default_secure_vault_seed_2026").encode("utf-8")
-        return hashlib.sha256(seed).digest()
+        if settings.bot_token:
+            return hashlib.sha256(settings.bot_token.encode("utf-8")).digest()
+        raise RuntimeError("DATA_ENCRYPTION_KEY is required for encryption")
     if len(key_str) == 64:
         try:
             return bytes.fromhex(key_str)
@@ -125,5 +125,8 @@ def blind_index(value: str | None) -> str:
     if not value:
         return ""
     normalized = value.strip().lower()
-    secret = (settings.blind_index_secret or settings.bot_token or "blind_index_secret_fallback").encode("utf-8")
+    secret_str = (settings.blind_index_secret or settings.bot_token or "").strip()
+    if not secret_str:
+        raise RuntimeError("BLIND_INDEX_SECRET is required for blind indexing")
+    secret = secret_str.encode("utf-8")
     return hmac.new(secret, normalized.encode("utf-8"), hashlib.sha256).hexdigest()

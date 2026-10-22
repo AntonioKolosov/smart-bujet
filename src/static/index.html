@@ -6,7 +6,7 @@
   <title>Smart Bujet — Журнал и Депозиты</title>
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="/static/styles.css?v=2.15">
+  <link rel="stylesheet" href="/static/styles.css?v=2.17">
 </head>
 <body>
   <div id="app" class="container">
@@ -50,7 +50,10 @@
 
         <div class="toolbar">
           <h2 class="section-title">История транзакций</h2>
-          <button id="refreshBtn" class="refresh-btn" title="Обновить">↻</button>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button id="btnHeaderFacts" class="header-facts-btn" title="Персонализация">🧠 Персонализация</button>
+            <button id="refreshBtn" class="refresh-btn" title="Обновить">↻</button>
+          </div>
         </div>
 
         <div id="loader" class="loader-container hidden">
@@ -299,7 +302,7 @@
       <div class="facts-hero">
         <div class="facts-header-row">
           <div>
-            <div class="facts-title">🧠 Память агента</div>
+            <div class="facts-title">🧠 Персонализация</div>
             <div class="facts-subtitle">Цели, привычки и расписание — агент учитывает их в советах</div>
           </div>
           <button id="addFactBtn" class="primary-btn-sm" style="background: var(--button-color, #0284c7); color: #fff; border: none; border-radius: 10px; padding: 8px 14px; font-weight: 600; font-size: 0.85rem; cursor: pointer; white-space: nowrap;">+ Добавить факт</button>
@@ -320,6 +323,12 @@
       </div>
 
       <div id="factsList" class="facts-list"></div>
+
+      <div class="danger-zone-card">
+        <div class="danger-zone-title">⚠️ Опасная зона</div>
+        <div class="danger-zone-desc">Полное и безвозвратное удаление всех ваших транзакций, счетов, кредитов и профиля.</div>
+        <button type="button" id="btnMiniAppDeleteAccount" class="danger-zone-btn">🗑 Удалить аккаунт и все данные</button>
+      </div>
     </section>
   </div>
 
@@ -680,10 +689,10 @@
     </button>
     <button class="nav-item" id="navFactsBtn" data-tab="tab-facts">
       <span class="nav-icon">🧠</span>
-      <span class="nav-text">Память</span>
+      <span class="nav-text">Персонализация</span>
     </button>
   </nav>
 
-  <script src="/static/app.js?v=2.15"></script>
+  <script src="/static/app.js?v=2.17"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 import html
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,6 +50,6 @@ async def cmd_facts(message: Message, session: AsyncSession):
 
     app_url = f"{get_miniapp_url()}?page=facts"
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🧠 Открыть Персонализацию", web_app={"url": app_url})]
+        [InlineKeyboardButton(text="🧠 Открыть Персонализацию", web_app=WebAppInfo(url=app_url))]
     ])
     await message.answer("\n".join(lines), reply_markup=kb)

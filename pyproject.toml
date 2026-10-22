@@ -12,7 +12,8 @@ dependencies = [
     "alembic",
     "pydantic-settings",
     "google-genai",
-    "httpx"
+    "httpx",
+    "pypdf>=4.0.0"
 ]
 
 [project.optional-dependencies]

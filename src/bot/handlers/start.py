@@ -102,19 +102,18 @@ async def cmd_reset(message: Message, session: AsyncSession):
 @router.message(CommandStart())
 async def cmd_start(message: Message, session: AsyncSession, command: CommandObject):
     user_id = message.from_user.id
-    username = message.from_user.username
     first_name = message.from_user.first_name
     
     user = await session.scalar(select(User).where(User.id == user_id))
     is_new_user = False
     
     if not user:
-        user = User(id=user_id, username=username, first_name=first_name, currency="KZT")
+        user = User(id=user_id, username=None, first_name=first_name, currency="KZT")
         session.add(user)
         await session.commit()
         is_new_user = True
-    elif user.username != username or user.first_name != first_name:
-        user.username = username
+    elif user.username is not None or user.first_name != first_name:
+        user.username = None
         user.first_name = first_name
         await session.commit()
 
@@ -149,11 +148,28 @@ async def cmd_start(message: Message, session: AsyncSession, command: CommandObj
             )
         return
 
+    if is_new_user or not getattr(user, "has_accepted_terms", True):
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        privacy_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Принимаю условия", callback_data="privacy:accept")]
+        ])
+        await message.answer(
+            f"🛡 <b>Политика конфиденциальности и защита данных</b>\n\n"
+            f"Добро пожаловать в <b>Smart Bujet</b>! Перед началом работы ознакомьтесь с правилами безопасности:\n\n"
+            f"• 🔒 <b>Сквозное шифрование (AES-256-GCM):</b> названия ваших покупок, счетов и кредитов зашифрованы в базе данных.\n"
+            f"• 🛡 <b>Guardrails-маскирование:</b> перед отправкой в AI имена, номера карт и телефоны обезличиваются.\n"
+            f"• 🙈 <b>Слепота администратора:</b> ваш @username не сохраняется в базе данных.\n"
+            f"• 🗑 <b>Право на удаление:</b> в любой момент команда /delete_account безвозвратно удаляет все ваши данные.\n\n"
+            f"Нажимая кнопку ниже, вы соглашаетесь на обработку данных финансовым ассистентом.",
+            reply_markup=privacy_kb
+        )
+        return
+
     # First-time onboarding fork: Start fresh vs Upload bank statements
-    if is_new_user or user.initial_balance is None:
+    if user.initial_balance is None:
         STATEMENT_BUFFER.pop(user_id, None)
         await message.answer(
-            f"👋 <b>Добро пожаловать в Smart Буджет, {user.first_name or ''}!</b>\n\n"
+            f"👋 <b>Добро пожаловать в Smart Bujet, {user.first_name or ''}!</b>\n\n"
             f"Как вы хотите начать вести учёт?\n\n"
             f"• <b>🚀 Начать с нуля</b> — стандартная регистрация: выберите валюту и укажите текущий баланс.\n"
             f"• <b>📄 Загрузить историю</b> — отправьте одну или несколько банковских выписок (PDF), и бот автоматически восстановит историю, посчитает расходы и текущий баланс.",
@@ -206,7 +222,7 @@ async def on_onboard_statement(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.message(F.document)
+@router.message(F.document, F.from_user.id.func(lambda uid: uid in STATEMENT_BUFFER))
 async def handle_statement_pdf_upload(message: Message, session: AsyncSession):
     user_id = message.from_user.id
     if user_id not in STATEMENT_BUFFER:
@@ -341,4 +357,83 @@ async def process_currency(callback: CallbackQuery, session: AsyncSession):
             BotMessages.currency_updated(currency),
             reply_markup=welcome_back_keyboard(miniapp_url=miniapp_url)
         )
+    await callback.answer()
+
+@router.callback_query(F.data == "privacy:accept")
+async def on_privacy_accept(callback: CallbackQuery, session: AsyncSession):
+    user = await session.scalar(select(User).where(User.id == callback.from_user.id))
+    if user:
+        user.has_accepted_terms = True
+        await session.commit()
+
+    if not user or user.initial_balance is None:
+        STATEMENT_BUFFER.pop(callback.from_user.id, None)
+        await callback.message.edit_text(
+            f"👋 <b>Добро пожаловать в Smart Bujet, {user.first_name if user else ''}!</b>\n\n"
+            f"Как вы хотите начать вести учёт?\n\n"
+            f"• <b>🚀 Начать с нуля</b> — стандартная регистрация: выберите валюту и укажите текущий баланс.\n"
+            f"• <b>📄 Загрузить историю</b> — отправьте одну или несколько банковских выписок (PDF), и бот автоматически восстановит историю, посчитает расходы и текущий баланс.",
+            reply_markup=onboarding_choice_keyboard()
+        )
+    else:
+        miniapp_url = get_miniapp_url()
+        await callback.message.edit_text(
+            f"✅ Условия конфиденциальности приняты!\n\n{BotMessages.welcome_back(user.first_name, user.currency, 0.0)}",
+            reply_markup=welcome_back_keyboard(miniapp_url=miniapp_url)
+        )
+    await callback.answer()
+
+
+@router.message(Command("delete_account"))
+async def cmd_delete_account(message: Message):
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Да, безвозвратно удалить всё", callback_data="act:delete:confirm")],
+        [InlineKeyboardButton(text="🔙 Отмена", callback_data="act:delete:cancel")]
+    ])
+    await message.answer(
+        "⚠️ <b>Внимание! Полное удаление аккаунта</b>\n\n"
+        "Вы действительно хотите безвозвратно удалить свой профиль и ВСЮ историю транзакций, счетов и кредитов?\n\n"
+        "Это действие невозможно отменить.",
+        reply_markup=confirm_kb
+    )
+
+
+@router.callback_query(F.data == "act:delete:cancel")
+async def on_delete_cancel(callback: CallbackQuery):
+    await callback.message.edit_text("Действие отменено.")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "act:delete:confirm")
+async def on_delete_confirm(callback: CallbackQuery, session: AsyncSession):
+    user = await session.scalar(select(User).where(User.id == callback.from_user.id))
+    if not user:
+        await callback.message.edit_text("Аккаунт не найден.")
+        await callback.answer()
+        return
+
+    from src.models.family import FamilyGroup
+    if user.family_group_id:
+        family = await session.get(FamilyGroup, user.family_group_id)
+        if family and family.owner_id == user.id:
+            other_member = await session.scalar(
+                select(User).where(User.family_group_id == family.id, User.id != user.id)
+            )
+            if other_member:
+                family.owner_id = other_member.id
+                user.family_group_id = None
+                await session.flush()
+            else:
+                user.family_group_id = None
+                await session.flush()
+                await session.delete(family)
+                await session.flush()
+        else:
+            user.family_group_id = None
+            await session.flush()
+
+    await session.delete(user)
+    await session.commit()
+    await callback.message.edit_text("🗑 <b>Ваш аккаунт и все данные успешно и безвозвратно удалены.</b>\n\nЕсли захотите вернуться, просто отправьте /start.")
     await callback.answer()

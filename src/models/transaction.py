@@ -60,3 +60,7 @@ class Transaction(Base, TimestampMixin):
     @property
     def category_name(self) -> str | None:
         return self.category.name if self.category else None
+
+    @property
+    def asset_currency(self) -> str | None:
+        return self.asset_account.currency if self.asset_account else None

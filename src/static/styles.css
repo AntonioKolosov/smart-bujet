@@ -978,9 +978,9 @@ input[type="number"] {
   right: 0;
   background: var(--secondary-bg-color);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  display: flex;
-  justify-content: space-around;
-  padding: 8px 12px calc(var(--safe-bottom) + 8px) 12px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  padding: 6px 4px calc(var(--safe-bottom) + 6px) 4px;
   z-index: 100;
   backdrop-filter: blur(10px);
 }
@@ -992,13 +992,82 @@ input[type="number"] {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  font-size: 0.75rem;
+  justify-content: center;
+  gap: 3px;
+  font-size: 0.68rem;
   font-weight: 500;
   cursor: pointer;
-  padding: 6px 16px;
-  border-radius: 12px;
+  padding: 6px 2px;
+  border-radius: 10px;
   transition: all 0.2s ease;
+  min-width: 0;
+}
+
+.nav-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.header-facts-btn {
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--link-color, #38bdf8);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.header-facts-btn:active {
+  transform: scale(0.97);
+  background: rgba(56, 189, 248, 0.22);
+}
+
+.danger-zone-card {
+  margin: 32px 0 20px 0;
+  padding: 16px;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 14px;
+  text-align: center;
+}
+
+.danger-zone-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #ef4444;
+  margin-bottom: 6px;
+}
+
+.danger-zone-desc {
+  font-size: 0.8rem;
+  color: var(--hint-color);
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.danger-zone-btn {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  transition: all 0.2s ease;
+}
+
+.danger-zone-btn:active {
+  background: rgba(239, 68, 68, 0.3);
 }
 
 .nav-icon {

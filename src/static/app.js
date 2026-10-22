@@ -2304,20 +2304,74 @@
     });
   }
 
+  // Header facts button shortcut
+  const btnHeaderFacts = document.getElementById('btnHeaderFacts');
+  if (btnHeaderFacts) {
+    btnHeaderFacts.addEventListener('click', () => switchTab('tab-facts'));
+  }
+
+  // Account deletion button handler
+  const btnMiniAppDeleteAccount = document.getElementById('btnMiniAppDeleteAccount');
+  if (btnMiniAppDeleteAccount) {
+    btnMiniAppDeleteAccount.addEventListener('click', async () => {
+      const confirmMsg = "Вы уверены, что хотите безвозвратно удалить свой аккаунт и ВСЕ финансовые данные?";
+      const doDelete = async () => {
+        try {
+          const initData = getInitData();
+          const res = await fetch('/api/v1/auth/me', {
+            method: 'DELETE',
+            headers: { 'X-Telegram-Init-Data': initData }
+          });
+          if (res.ok) {
+            alert("Ваш аккаунт и все данные успешно удалены.");
+            if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.close) {
+              window.Telegram.WebApp.close();
+            } else {
+              window.location.reload();
+            }
+          } else {
+            const err = await res.json().catch(() => ({}));
+            alert(err.detail || "Не удалось удалить аккаунт");
+          }
+        } catch (e) {
+          alert("Ошибка сети при удалении аккаунта");
+        }
+      };
+
+      if (window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.showConfirm === 'function') {
+        window.Telegram.WebApp.showConfirm(confirmMsg, (confirmed) => {
+          if (confirmed) doDelete();
+        });
+      } else {
+        if (confirm(confirmMsg)) {
+          await doDelete();
+        }
+      }
+    });
+  }
+
   // Check URL params for deep linking (e.g. ?page=deposits, ?page=family, ?page=credits, ?page=analytics, ?page=facts)
   const urlParams = new URLSearchParams(window.location.search);
-  const initialPage = (urlParams.get('page') || window.location.hash.replace('#', '') || '').toLowerCase();
+  const tgStartParam = (window.Telegram?.WebApp?.initDataUnsafe?.start_param || '').toLowerCase();
+  const rawTarget = (
+    urlParams.get('page') ||
+    urlParams.get('startapp') ||
+    urlParams.get('tgWebAppStartParam') ||
+    tgStartParam ||
+    window.location.hash.replace('#', '') ||
+    ''
+  ).toLowerCase();
 
-  if (initialPage === 'deposits' || initialPage === 'assets') {
+  if (rawTarget.includes('deposit') || rawTarget.includes('asset')) {
     switchTab('tab-assets');
-  } else if (initialPage === 'credits' || initialPage === 'loans') {
+  } else if (rawTarget.includes('credit') || rawTarget.includes('loan')) {
     switchTab('tab-credits');
-  } else if (initialPage === 'family' || initialPage === 'fam') {
+  } else if (rawTarget.includes('fam')) {
     switchTab('tab-operations');
     switchOpsMode('family');
-  } else if (initialPage === 'analytics' || initialPage === 'stats') {
+  } else if (rawTarget.includes('analytic') || rawTarget.includes('stat')) {
     switchTab('tab-analytics');
-  } else if (initialPage === 'facts' || initialPage === 'personalization' || initialPage === 'profile') {
+  } else if (rawTarget.includes('fact') || rawTarget.includes('personal') || rawTarget.includes('profile')) {
     switchTab('tab-facts');
   } else {
     switchTab('tab-operations');

@@ -45,9 +45,13 @@ def clean_gemini_json(raw_text: str) -> dict[str, Any]:
         return {}
 
 
-def extract_and_redact_pdf_text(pdf_bytes: bytes, max_pages: int = 20) -> tuple[str, bool]:
+def extract_and_redact_pdf_text(
+    pdf_bytes: bytes,
+    max_pages: int = 20,
+    known_names: list[str] | None = None
+) -> tuple[str, bool]:
     """
-    Extracts text from PDF up to max_pages and redacts sensitive PII (IBAN, card numbers, IIN).
+    Extracts text from PDF up to max_pages and redacts sensitive PII (IBAN, card numbers, IIN, counterparty names).
     Returns (cleaned_text, is_empty_or_scanned).
     """
     if not pypdf:
@@ -66,6 +70,15 @@ def extract_and_redact_pdf_text(pdf_bytes: bytes, max_pages: int = 20) -> tuple[
         text_content = re.sub(r"\b(?:\d[ -]*?){13,19}\b", "[CARD_MASKED]", text_content)
         # Redact IIN/BIN (12 digits)
         text_content = re.sub(r"\b\d{12}\b", "[ID_MASKED]", text_content)
+        # Redact P2P transfer counterparty full names
+        text_content = re.sub(r"(?:перевод\s+(?:от|кому|клиенту)?\s*)([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.?)", r"Перевод [ИМЯ_СКРЫТО]", text_content, flags=re.IGNORECASE)
+
+        # Apply PIIGuardrailService mask if available
+        try:
+            from src.services.pii_guardrail import PIIGuardrailService
+            text_content, _ = PIIGuardrailService.mask_text(text_content, known_names=known_names)
+        except Exception:
+            pass
 
         return text_content, False
     except Exception as exc:
@@ -80,8 +93,20 @@ class BankStatementService:
         self.client = genai.Client(api_key=self.api_key) if (self.api_key and genai is not None) else None
         self.model_name = model_name or settings.gemini_model
 
-    async def parse_single_pdf(self, pdf_bytes: bytes, filename: str) -> dict[str, Any]:
+    async def parse_single_pdf(
+        self,
+        pdf_bytes: bytes,
+        filename: str,
+        user_id: int | None = None,
+        known_names: list[str] | None = None
+    ) -> dict[str, Any]:
         """Parse one bank statement PDF using Gemini."""
+        if user_id is not None:
+            from src.core.rate_limiter import ai_rate_limiter
+            allowed, _ = ai_rate_limiter.check_and_record(user_id)
+            if not allowed:
+                return {"error": "Превышен лимит запросов к AI. Подождите немного.", "transactions": []}
+
         if not self.client:
             logger.error("Gemini client not initialized for BankStatementService")
             return {"error": "AI service unavailable", "transactions": []}
@@ -90,7 +115,7 @@ class BankStatementService:
         if len(pdf_bytes) > 5 * 1024 * 1024:
             return {"error": "Размер файла превышает лимит 5 МБ", "transactions": []}
 
-        extracted_text, is_scanned = extract_and_redact_pdf_text(pdf_bytes, max_pages=20)
+        extracted_text, is_scanned = extract_and_redact_pdf_text(pdf_bytes, max_pages=20, known_names=known_names)
 
         prompt = (
             "Ты специализированный финансовый анализатор банковских выписок (PDF) приложения Smart Bujet.\n"
@@ -103,7 +128,8 @@ class BankStatementService:
             "   - 'type': 'expense' (списание, покупка, комиссия, исходящий перевод) или 'income' (пополнение, зарплата, входящий перевод, кешбэк, проценты).\n"
             "   - 'item_name': получатель/магазин/описание (например 'Magnum', 'Yandex Go', 'Зарплата', 'Kaspi Pay').\n"
             "   - 'category': категория из стандартных: 'Продукты', 'Транспорт', 'Кафе и рестораны', 'Здоровье', 'Развлечения', 'Шоппинг', 'Коммунальные услуги', 'Связь', 'Подписки', 'Зарплата', 'Денежный перевод', 'Прочее'.\n"
-            "2. Извлеки метаданные выписки:\n"
+            "2. Исключи внутренние переводы между своими счетами/депозитами внутри одного банка, если они дублируют операции.\n"
+            "3. Извлеки метаданные выписки:\n"
             "   - 'bank_name': название банка (например 'Kaspi Bank', 'Halyk Bank', 'ForteBank', 'Сбербанк', 'Тинькофф').\n"
             "   - 'currency': валюта (например 'KZT', 'USD', 'RUB', 'EUR'). По умолчанию 'KZT'.\n"
             "   - 'period_start': дата начала выписки 'YYYY-MM-DD'.\n"
@@ -210,8 +236,9 @@ class BankStatementService:
 
         seen_batch: set[tuple] = set()
 
+        known = [user.first_name] if user.first_name else None
         for filename, pdf_bytes in files:
-            statement_data = await self.parse_single_pdf(pdf_bytes, filename)
+            statement_data = await self.parse_single_pdf(pdf_bytes, filename, user_id=user.id, known_names=known)
             bank = statement_data.get("bank_name")
             if bank:
                 bank_names.add(bank)

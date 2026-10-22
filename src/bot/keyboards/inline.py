@@ -13,9 +13,9 @@ def currency_keyboard() -> InlineKeyboardMarkup:
 
 def get_miniapp_url() -> str:
     from src.core.config import settings
-    domain = settings.domain
+    domain = (settings.domain or "").strip()
     if not domain or domain == "localhost":
-        domain = "85.198.89.188.sslip.io:8443"
+        domain = "dev.85.198.89.188.sslip.io:8443"
     elif ":" not in domain and "sslip.io" in domain:
         domain = f"{domain}:8443"
     return f"https://{domain}/app"
