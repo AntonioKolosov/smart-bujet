@@ -48,7 +48,9 @@ async def cmd_facts(message: Message, session: AsyncSession):
             lines.append(f"{idx}. [{cat_label}] {html.escape(m.fact_text)}")
         lines.append("\nВы можете управлять фактами в приложении:")
 
-    app_url = f"{get_miniapp_url()}?page=facts"
+    base_url = get_miniapp_url()
+    sep = "&" if "?" in base_url else "?"
+    app_url = f"{base_url}{sep}page=facts"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🧠 Открыть Персонализацию", web_app=WebAppInfo(url=app_url))]
     ])

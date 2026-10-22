@@ -56,12 +56,8 @@ async def lifespan(app: FastAPI):
     # Configure Telegram Menu Button and Bot Commands for instant MiniApp access
     if is_real_token:
         try:
-            domain = settings.domain
-            if not domain or domain == "localhost":
-                domain = "85.198.89.188.sslip.io:8443"
-            elif ":" not in domain and "sslip.io" in domain:
-                domain = f"{domain}:8443"
-            miniapp_url = f"https://{domain}/app"
+            from src.bot.keyboards.inline import get_miniapp_url
+            miniapp_url = get_miniapp_url()
 
             me = await bot.get_me()
             if me and me.username:
@@ -69,7 +65,7 @@ async def lifespan(app: FastAPI):
 
             await bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(
-                    text="Menu",
+                    text="Smart Bujet",
                     web_app=WebAppInfo(url=miniapp_url)
                 )
             )

@@ -993,14 +993,15 @@ input[type="number"] {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  font-size: 0.68rem;
+  gap: 2px;
+  font-size: 0.62rem;
   font-weight: 500;
   cursor: pointer;
-  padding: 6px 2px;
+  padding: 5px 1px;
   border-radius: 10px;
   transition: all 0.2s ease;
   min-width: 0;
+  overflow: hidden;
 }
 
 .nav-text {
@@ -1008,6 +1009,7 @@ input[type="number"] {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+  letter-spacing: -0.2px;
 }
 
 .header-facts-btn {
