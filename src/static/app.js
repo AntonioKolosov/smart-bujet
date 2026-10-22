@@ -377,7 +377,10 @@
         userCurrency = data.currency || 'KZT';
         currencySymbol = CURRENCY_SYMBOLS[userCurrency] || userCurrency;
         userGreetingEl.textContent = data.first_name ? `Привет, ${data.first_name}!` : 'Smart Bujet';
-        currencyBadgeEl.textContent = `${currencySymbol} ${userCurrency}`;
+        if (currencyBadgeEl) {
+          currencyBadgeEl.textContent = `${currencySymbol} ${userCurrency}`;
+        }
+        updateSettingsCurrencyUI(userCurrency);
 
         userLiquidBalance = Number(data.current_balance || 0);
         currentBalanceEl.textContent = formatMoney(userLiquidBalance);
@@ -392,7 +395,9 @@
         }
       }
     } catch (e) {
-      currencyBadgeEl.textContent = `${currencySymbol} ${userCurrency}`;
+      if (currencyBadgeEl) {
+        currencyBadgeEl.textContent = `${currencySymbol} ${userCurrency}`;
+      }
     }
   }
 
@@ -2037,18 +2042,6 @@
   const settingsBtn = document.getElementById('settingsBtn');
   const settingsModal = document.getElementById('settingsModal');
   const closeSettingsModalBtn = document.getElementById('closeSettingsModalBtn');
-
-  function updateSettingsCurrencyUI(curr) {
-    if (!curr) return;
-    const btns = document.querySelectorAll('.currency-pill-btn');
-    btns.forEach(btn => {
-      if (btn.getAttribute('data-currency') === curr) {
-        btn.classList.add('active');
-      } else {
-        btn.classList.remove('active');
-      }
-    });
-  }
 
   if (settingsBtn && settingsModal) {
     settingsBtn.addEventListener('click', () => {
