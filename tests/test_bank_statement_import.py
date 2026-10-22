@@ -44,6 +44,48 @@ class TestBankStatementImport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed.get("bank_name"), "Kaspi")
         self.assertEqual(parsed.get("closing_balance"), 50000)
 
+    def test_clean_gemini_json_salvages_truncated_output(self):
+        truncated = (
+            '{"bank_name": "Kaspi Bank", "currency": "KZT", "closing_balance": 95000.0, "transactions": ['
+            '{"date": "2025-01-10", "amount": 4500.0, "type": "expense", "item_name": "Magnum", "category": "Продукты"}, '
+            '{"date": "2025-01-11", "amount": 1200.0, "type": "expen'
+        )
+        parsed = clean_gemini_json(truncated)
+        self.assertEqual(parsed.get("bank_name"), "Kaspi Bank")
+        self.assertEqual(parsed.get("closing_balance"), 95000.0)
+        self.assertEqual(len(parsed.get("transactions", [])), 1)
+        self.assertEqual(parsed["transactions"][0]["item_name"], "Magnum")
+
+    async def test_parse_single_pdf_merges_multiple_chunks_and_checks_rate_limiter(self):
+        session = AsyncMock()
+        service = BankStatementService(session, api_key="test_key")
+        service.client = MagicMock()
+
+        with patch(
+            "src.services.bank_statement_service.extract_and_redact_pdf_chunks",
+            return_value=(["chunk_1", "chunk_2"], False),
+        ):
+            service._call_gemini_chunk = AsyncMock(
+                side_effect=[
+                    {
+                        "bank_name": "Kaspi Bank",
+                        "currency": "KZT",
+                        "period_start": "2025-01-01",
+                        "period_end": "2025-06-30",
+                        "closing_balance": 120000.0,
+                        "transactions": [{"date": "2025-02-01", "amount": 5000.0, "type": "expense", "item_name": "A"}],
+                    },
+                    {
+                        "period_end": "2025-12-31",
+                        "transactions": [{"date": "2025-11-01", "amount": 7000.0, "type": "expense", "item_name": "B"}],
+                    },
+                ]
+            )
+            merged = await service.parse_single_pdf(b"pdf", "year.pdf", user_id=999, known_names=["Test"])
+            self.assertEqual(merged["bank_name"], "Kaspi Bank")
+            self.assertEqual(merged["period_end"], "2025-12-31")
+            self.assertEqual(len(merged["transactions"]), 2)
+
     async def test_bank_statement_import_calibrates_balance_and_records_history(self):
         session = AsyncMock()
         user = User(id=123, username="testuser", first_name="Test", currency="KZT", initial_balance=None)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import io
 import logging
+import time
 from collections import defaultdict
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command, CommandObject
@@ -226,7 +227,6 @@ async def on_onboard_statement(callback: CallbackQuery):
 async def handle_statement_pdf_upload(message: Message, session: AsyncSession):
     user_id = message.from_user.id
     if user_id not in STATEMENT_BUFFER:
-        # Not currently uploading bank statements. Let receipt handlers handle other documents.
         return
 
     doc = message.document
@@ -275,7 +275,8 @@ async def on_statement_process(callback: CallbackQuery, session: AsyncSession, b
     count = len(files_meta)
     await callback.message.edit_text(
         f"⏳ <b>Анализирую банковские выписки ({count} шт.) с помощью AI...</b>\n\n"
-        f"Распознаю историю операций, даты, категории и остаток. Это займет несколько секунд."
+        f"Распознаю историю операций за весь период, даты, категории и остаток. "
+        f"Для годовых выписок это может занять 15–40 секунд."
     )
     await callback.answer()
 
@@ -287,14 +288,44 @@ async def on_statement_process(callback: CallbackQuery, session: AsyncSession, b
             downloaded.append((file_name, buf.getvalue()))
     except Exception as exc:
         logger.error("Failed to download statement files: %s", exc)
+        STATEMENT_BUFFER[user_id].extend(files_meta)
         await callback.message.answer(
             f"❌ Не удалось загрузить файлы из Telegram: {exc}\nПопробуйте ещё раз.",
             reply_markup=statement_upload_keyboard(collected_count=count)
         )
         return
 
+    last_edit_ts = 0.0
+
+    async def update_progress(status_text: str) -> None:
+        nonlocal last_edit_ts
+        now_ts = time.monotonic()
+        if now_ts - last_edit_ts < 2.5:
+            return
+        last_edit_ts = now_ts
+        try:
+            await callback.message.edit_text(status_text)
+        except Exception:
+            pass
+
     statement_service = BankStatementService(session)
-    result = await statement_service.import_statements(user_id=user.id, files=downloaded)
+    try:
+        result = await statement_service.import_statements(
+            user_id=user.id,
+            files=downloaded,
+            progress_callback=update_progress,
+        )
+    except Exception as exc:
+        logger.exception("Unhandled error during statement import for user %s: %s", user_id, exc)
+        STATEMENT_BUFFER[user_id].extend(files_meta)
+        await callback.message.answer(
+            "❌ <b>Произошла техническая ошибка при разборе выписки.</b>\n"
+            "Файлы сохранены в очереди — нажмите кнопку ниже, чтобы повторить попытку:",
+            reply_markup=statement_upload_keyboard(collected_count=count)
+        )
+        return
+    finally:
+        downloaded.clear()
 
     if not result.get("success"):
         error_msg = result.get("error", "Не удалось распознать операции.")
@@ -358,6 +389,7 @@ async def process_currency(callback: CallbackQuery, session: AsyncSession):
             reply_markup=welcome_back_keyboard(miniapp_url=miniapp_url)
         )
     await callback.answer()
+
 
 @router.callback_query(F.data == "privacy:accept")
 async def on_privacy_accept(callback: CallbackQuery, session: AsyncSession):
