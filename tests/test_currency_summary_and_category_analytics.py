@@ -244,8 +244,15 @@ class TestSingleCategoryMonthlyAnalytics(unittest.IsolatedAsyncioTestCase):
         with open(os.path.join(base_dir, "styles.css"), "r", encoding="utf-8") as f:
             css = f.read()
 
-        self.assertIn("styles.css?v=2.26", html)
-        self.assertIn("app.js?v=2.26", html)
+        self.assertIn("styles.css?v=2.27", html)
+        self.assertIn("app.js?v=2.27", html)
+        topbar_chunk = html.split('<header class="app-topbar">')[1].split("</header>")[0]
+        self.assertNotIn('id="settingsBtn"', topbar_chunk)
+        balance_card_chunk = html.split('<div id="opsPersonalView">')[1].split('<div class="header-summary">')[0]
+        self.assertIn('class="balance-card-top"', balance_card_chunk)
+        self.assertIn('id="settingsBtn"', balance_card_chunk)
+        self.assertIn(".balance-card-top", css)
+        self.assertIn("body.theme-light .settings-btn", css)
         self.assertIn('id="analyticsCategoryBtn"', html)
         self.assertIn("<span>Категория</span>", html)
         self.assertIn('id="categoryBarChartContainer"', html)
