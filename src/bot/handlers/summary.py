@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from aiogram import Router, F
 from aiogram.filters import Command
@@ -24,6 +25,9 @@ from src.bot.keyboards.inline import welcome_back_keyboard, get_miniapp_url
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+# Avoid paying +400ms (answer + delete) on every /summary command once legacy reply keyboard was cleared
+_CLEANED_REPLY_KB_USERS: set[int] = set()
 
 
 async def user_has_active_family(session: AsyncSession, user: User) -> bool:
@@ -99,18 +103,20 @@ async def cmd_summary(message: Message, session: AsyncSession):
     """
     Step 1 of refined UX flow:
     Lightweight prompt asking user to choose between personal or family summary.
-    Zero LLM calls, zero DB overhead, instant response.
+    Zero LLM calls, instant response.
     """
     user = await session.get(User, message.from_user.id)
     if not user:
         return
 
-    # Strip lingering persistent reply keyboard if present in Telegram client
-    try:
-        clean_msg = await message.answer("🔄", reply_markup=ReplyKeyboardRemove())
-        await clean_msg.delete()
-    except Exception:
-        pass
+    # Strip lingering persistent reply keyboard once per user session
+    if user.id not in _CLEANED_REPLY_KB_USERS:
+        try:
+            clean_msg = await message.answer("🔄", reply_markup=ReplyKeyboardRemove())
+            await clean_msg.delete()
+            _CLEANED_REPLY_KB_USERS.add(user.id)
+        except Exception:
+            pass
 
     has_fam = await user_has_active_family(session, user)
     text = "📊 <b>Финансовая сводка от агента</b>\n\nВыберите какую сводку сформировать:"
@@ -189,6 +195,7 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
 
     action = parts[1]
     scope = parts[2]
+    force_refresh = (action == "refresh")
 
     # Normalize scope for legacy callbacks (e.g. sum:month:p)
     if scope not in ("p", "f"):
@@ -226,7 +233,8 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
         advice = await ai_service.generate_financial_advice(
             summary,
             user_id=user.id,
-            user_facts=fact_texts
+            user_facts=fact_texts,
+            force_refresh=force_refresh,
         )
         text = format_summary_card(summary, advice, period_label="на текущую дату")
         kb = summary_card_inline_keyboard(active_scope="f")
@@ -236,7 +244,7 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
         except Exception as exc:
             logger.debug("Could not edit summary message: %s", exc)
 
-        if action == "refresh":
+        if force_refresh:
             await callback.answer("Семейная сводка обновлена")
         else:
             await callback.answer()
@@ -252,7 +260,8 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
     advice = await ai_service.generate_financial_advice(
         summary,
         user_id=user.id,
-        user_facts=fact_texts
+        user_facts=fact_texts,
+        force_refresh=force_refresh,
     )
     text = format_summary_card(summary, advice, period_label="на текущую дату")
     has_fam = await user_has_active_family(session, user)
@@ -263,7 +272,7 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
     except Exception as exc:
         logger.debug("Could not edit summary message: %s", exc)
 
-    if action == "refresh":
+    if force_refresh:
         await callback.answer("Личная сводка обновлена")
     else:
         await callback.answer()

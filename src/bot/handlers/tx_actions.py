@@ -13,6 +13,8 @@ from src.models.alias import UserItemAlias
 from src.models.dynamic_context import UserClassificationFeedback
 from src.services.transaction_service import TransactionService
 from src.services.category_service import CategoryService
+from src.services.parser_service import ParserService
+from src.core.security import blind_index
 from src.bot.messages import BotMessages, format_amount
 from src.bot.keyboards.inline import tx_toggle_keyboard
 
@@ -93,12 +95,15 @@ async def handle_tx_toggle(callback: CallbackQuery, session: AsyncSession):
             mirror_tx.related_transaction_id = None
         tx.related_transaction_id = None
 
-    # Real-time alias healing: rewrite alias so future inputs automatically use corrected category
-    if tx.item_name:
-        norm_name = tx.item_name.strip().lower()
+    # Real-time alias healing using HMAC-SHA256 blind_index (matching TransactionService._get_alias_category)
+    if tx.item_name and new_cat.name not in (
+        "Денежный перевод", "Депозит и вклады", "Покупка валюты", "Погашение кредита", "Получение кредита"
+    ):
+        normalized_item = ParserService.normalize_item_name(tx.item_name)
+        alias_hash = blind_index(normalized_item)
         alias_query = select(UserItemAlias).where(
             UserItemAlias.user_id == tx.user_id,
-            UserItemAlias.item_name_normalized == norm_name
+            UserItemAlias.item_name_normalized == alias_hash
         )
         alias = await session.scalar(alias_query)
         if alias:
@@ -107,7 +112,7 @@ async def handle_tx_toggle(callback: CallbackQuery, session: AsyncSession):
         else:
             session.add(UserItemAlias(
                 user_id=tx.user_id,
-                item_name_normalized=norm_name,
+                item_name_normalized=alias_hash,
                 category_id=new_cat.id,
                 usage_count=1
             ))
