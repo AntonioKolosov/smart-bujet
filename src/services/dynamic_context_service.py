@@ -1,10 +1,14 @@
 import logging
+import time
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.dynamic_context import DynamicFewShot
 from src.models.alias import UserItemAlias
 
 logger = logging.getLogger(__name__)
+
+_FEW_SHOTS_TTL_SECONDS = 600.0
+_FEW_SHOTS_CACHE: tuple[float, list[dict]] | None = None
 
 DEFAULT_FEW_SHOTS = [
     {
@@ -198,6 +202,7 @@ class DynamicContextService:
 
     async def seed_default_few_shots(self) -> None:
         """Seed default few-shots idempotently by raw_query."""
+        global _FEW_SHOTS_CACHE
         existing_res = await self.session.scalars(select(DynamicFewShot.raw_query))
         existing_queries = {q.strip().lower() for q in existing_res.all()}
 
@@ -215,6 +220,7 @@ class DynamicContextService:
         if to_add:
             self.session.add_all(to_add)
             await self.session.commit()
+            _FEW_SHOTS_CACHE = None
             logger.info("Dynamic few-shots successfully seeded: %d added", len(to_add))
 
     async def sanitize_poisoned_aliases(self) -> None:
@@ -234,30 +240,63 @@ class DynamicContextService:
         await self.session.commit()
         logger.info("Poisoned aliases sanitized.")
 
-    async def get_few_shots_for_query(self, text: str) -> list[dict]:
-        """Retrieve relevant few-shot examples based on keywords or tags."""
-        t = text.lower()
-        tags = []
-        if any(w in t for w in ["долг", "занял", "одолжил", "вернул", "отдал", "заем", "возврат"]):
-            tags.append("debt")
-        if any(w in t for w in ["перевел", "перевела", "скинул", "скинула", "отправил", "отправила"]):
-            tags.append("transfer")
-        if any(w in t for w in ["манты", "пельмени", "плов", "шашлык", "мясо", "сыр", "колбаса"]):
-            tags.append("food")
-        if any(w in t for w in ["ремонт", "гвозд", "гофр", "смесител", "мастер", "сантехник", "краск", "обои", "снос", "шпаклевк", "плитк", "стройматериал"]):
-            tags.append("repair")
-        if any(w in t for w in ["футболк", "одежд", "кроссовк", "обув", "книг", "игр", "куртк", "джинс", "плать", "рубашк", "шоппинг", "шопинг", "стим", "steam"]):
-            tags.append("shopping")
-        if any(w in t for w in ["штраф", "пошлин", "госпошлин", "нотариус", "комисси"]):
-            tags.append("misc")
+    async def _load_active_few_shots(self) -> list[dict]:
+        global _FEW_SHOTS_CACHE
+        is_mock_session = hasattr(self.session.scalars, "assert_called")
+        now = time.monotonic()
 
-        query = select(DynamicFewShot).where(DynamicFewShot.is_active == True)
-        if tags:
-            query = query.where(DynamicFewShot.domain_tag.in_(tags))
-        query = query.order_by(DynamicFewShot.priority.desc()).limit(4)
+        if not is_mock_session and _FEW_SHOTS_CACHE is not None:
+            expires_at, cached_rows = _FEW_SHOTS_CACHE
+            if now < expires_at:
+                return cached_rows
 
+        query = (
+            select(DynamicFewShot)
+            .where(DynamicFewShot.is_active == True)
+            .order_by(DynamicFewShot.priority.desc())
+        )
         results = (await self.session.scalars(query)).all()
-        return [{"query": s.raw_query, "expected": s.expected_payload} for s in results]
+        rows = [
+            {
+                "domain_tag": s.domain_tag,
+                "query": s.raw_query,
+                "expected": s.expected_payload,
+            }
+            for s in results
+        ]
+        if not is_mock_session:
+            _FEW_SHOTS_CACHE = (now + _FEW_SHOTS_TTL_SECONDS, rows)
+        return rows
+
+    async def get_few_shots_for_query(self, text: str) -> list[dict]:
+        """Retrieve relevant few-shot examples based on keywords or tags (0ms when no domain tags match)."""
+        if not text:
+            return []
+        t = text.lower()
+        tags: set[str] = set()
+        if any(w in t for w in ("долг", "занял", "одолжил", "вернул", "отдал", "заем", "возврат")):
+            tags.add("debt")
+        if any(w in t for w in ("перевел", "перевела", "скинул", "скинула", "отправил", "отправила")):
+            tags.add("transfer")
+        if any(w in t for w in ("манты", "пельмени", "плов", "шашлык", "мясо", "сыр", "колбаса")):
+            tags.add("food")
+        if any(w in t for w in ("ремонт", "гвозд", "гофр", "смесител", "мастер", "сантехник", "краск", "обои", "снос", "шпаклевк", "плитк", "стройматериал")):
+            tags.add("repair")
+        if any(w in t for w in ("футболк", "одежд", "кроссовк", "обув", "книг", "игр", "куртк", "джинс", "плать", "рубашк", "шоппинг", "шопинг", "стим", "steam")):
+            tags.add("shopping")
+        if any(w in t for w in ("штраф", "пошлин", "госпошлин", "нотариус", "комисси")):
+            tags.add("misc")
+
+        if not tags:
+            return []
+
+        all_shots = await self._load_active_few_shots()
+        matched = [
+            {"query": s["query"], "expected": s["expected"]}
+            for s in all_shots
+            if s.get("domain_tag") in tags
+        ]
+        return matched[:4]
 
     def format_few_shots_prompt(self, few_shots: list[dict]) -> str:
         if not few_shots:

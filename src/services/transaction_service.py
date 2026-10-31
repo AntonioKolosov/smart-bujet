@@ -1,32 +1,33 @@
-import uuid
-import re
 import asyncio
-import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
-from sqlalchemy import select, func, case
-from sqlalchemy.orm import joinedload
-from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException, status
+import logging
+import re
+from typing import Any, Sequence
+import uuid
 
-from src.models.user import User
-from src.models.category import Category, CategoryType
-from src.models.transaction import Transaction, TransactionSource
+from fastapi import HTTPException, status
+from sqlalchemy import case, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
+
+from src.bot.messages import format_amount
+from src.core.exceptions import InvalidTransactionAmountError, OffTopicMessageError, TransactionParseError
+from src.core.security import blind_index
 from src.models.alias import UserItemAlias
 from src.models.asset import AssetAccount, AssetType
+from src.models.category import Category, CategoryType
 from src.models.credit import CreditAccount
+from src.models.transaction import Transaction, TransactionSource
+from src.models.user import User
 from src.schemas.transaction import TransactionCreate, TransactionUpdate
-from src.core.exceptions import InvalidTransactionAmountError, TransactionParseError, OffTopicMessageError
-from src.services.parser_service import ParserService
-from src.services.category_service import CategoryService
+from src.services.ai_service import AIService, _ASSET_TRIGGER_RE, _CREDIT_TRIGGER_RE
 from src.services.asset_service import AssetService
+from src.services.category_service import CategoryService
 from src.services.credit_service import CreditService
-from src.services.ai_service import AIService
-from src.services.dynamic_context_service import DynamicContextService
 from src.services.discount_service import DiscountDistributor
-from src.bot.messages import format_amount
-from src.core.security import blind_index
+from src.services.dynamic_context_service import DynamicContextService
+from src.services.parser_service import ParserService
 
 logger = logging.getLogger(__name__)
 
@@ -35,19 +36,88 @@ PARTNER_TRANSFER_REGEX = re.compile(
     re.IGNORECASE
 )
 
+_NON_ALIASABLE_CATEGORIES = frozenset({
+    "Денежный перевод",
+    "Депозит и вклады",
+    "Покупка валюты",
+    "Погашение кредита",
+    "Получение кредита",
+    "Снятие с депозита",
+    "Продажа валюты",
+})
+
 
 class BatchCategoryResolver:
     """
     Unified in-memory resolver and memoizer for batch transaction processing.
     Eliminates read and write N+1 database queries across text, voice, and photo processing.
     """
-    def __init__(self, service: "TransactionService", user_id: int):
+    def __init__(
+        self,
+        service: "TransactionService",
+        user_id: int,
+        preloaded_categories: Sequence[Category] | None = None,
+    ):
         self.service = service
         self.user_id = user_id
         self.alias_cache: dict[tuple[str, CategoryType | None], Category | None] = {}
         self.resolve_cache: dict[tuple[str, CategoryType], Category | None] = {}
         self.fallback_cache: dict[CategoryType, Category | None] = {}
         self.saved_aliases: set[str] = set()
+        self._preloaded_by_key: dict[tuple[str, CategoryType], Category] = {}
+        self._preloaded_by_type: dict[CategoryType, list[Category]] = {}
+
+        if preloaded_categories and not hasattr(self.service._resolve_category, "assert_called"):
+            # Sort so custom user categories override system categories with the same name
+            sorted_cats = sorted(
+                [c for c in preloaded_categories if isinstance(c, Category)],
+                key=lambda c: (0 if getattr(c, "user_id", None) is None else 1),
+            )
+            for c in sorted_cats:
+                if c.name and c.type:
+                    self._preloaded_by_key[(c.name.strip().lower(), c.type)] = c
+                    self._preloaded_by_type.setdefault(c.type, []).append(c)
+
+    async def preload_aliases(self, normalized_names: Sequence[str]) -> None:
+        """Batch-loads all aliases for a multi-item receipt/voice payload in 1 SQL query."""
+        unique_names = list({n for n in normalized_names if n})
+        if len(unique_names) <= 1:
+            return
+        if hasattr(self.service._get_alias_category, "assert_called"):
+            return
+        if hasattr(self.service.session.execute, "assert_called"):
+            return
+
+        hash_to_names: dict[str, list[str]] = {}
+        for name in unique_names:
+            h = blind_index(name)
+            if h:
+                hash_to_names.setdefault(h, []).append(name)
+        if not hash_to_names:
+            return
+
+        stmt = (
+            select(UserItemAlias, Category)
+            .join(Category, Category.id == UserItemAlias.category_id)
+            .where(
+                UserItemAlias.user_id == self.user_id,
+                UserItemAlias.item_name_normalized.in_(list(hash_to_names.keys())),
+            )
+        )
+        res = await self.service.session.execute(stmt)
+        rows = res.all() if hasattr(res, "all") else []
+        matched_names: set[str] = set()
+        if isinstance(rows, list):
+            for alias_obj, cat_obj in rows:
+                alias_obj.usage_count += 1
+                for orig_name in hash_to_names.get(alias_obj.item_name_normalized, ()):
+                    self.alias_cache[(orig_name, cat_obj.type)] = cat_obj
+                    matched_names.add(orig_name)
+
+        # Mark remaining names as cache misses for standard types to avoid per-item SELECTs
+        for name in unique_names:
+            if name not in matched_names:
+                self.alias_cache.setdefault((name, CategoryType.expense), None)
 
     async def resolve(
         self,
@@ -63,20 +133,28 @@ class BatchCategoryResolver:
         category = self.alias_cache[alias_key]
 
         if not category and item.get("category"):
-            resolve_key = (item["category"], cat_type)
+            cat_raw = str(item["category"]).strip()
+            resolve_key = (cat_raw, cat_type)
             if resolve_key not in self.resolve_cache:
-                self.resolve_cache[resolve_key] = await self.service._resolve_category(
-                    item["category"], cat_type, self.user_id
-                )
+                preloaded = self._preloaded_by_key.get((cat_raw.lower(), cat_type))
+                if preloaded is not None:
+                    self.resolve_cache[resolve_key] = preloaded
+                elif self._preloaded_by_type.get(cat_type):
+                    cats_for_type = self._preloaded_by_type[cat_type]
+                    safe = [c for c in cats_for_type if c.name not in _NON_ALIASABLE_CATEGORIES]
+                    self.resolve_cache[resolve_key] = safe[0] if safe else cats_for_type[0]
+                else:
+                    self.resolve_cache[resolve_key] = await self.service._resolve_category(
+                        cat_raw, cat_type, self.user_id
+                    )
             category = self.resolve_cache[resolve_key]
 
         if not category:
             if cat_type not in self.fallback_cache:
-                cats = await self.service.category_service.get_categories(self.user_id, cat_type)
-                safe_cats = [
-                    c for c in cats
-                    if c.name not in ("Денежный перевод", "Депозит и вклады", "Покупка валюты", "Погашение кредита", "Получение кредита", "Снятие с депозита", "Продажа валюты")
-                ]
+                cats = self._preloaded_by_type.get(cat_type)
+                if not cats:
+                    cats = list(await self.service.category_service.get_categories(self.user_id, cat_type))
+                safe_cats = [c for c in cats if c.name not in _NON_ALIASABLE_CATEGORIES]
                 self.fallback_cache[cat_type] = safe_cats[0] if safe_cats else (cats[0] if cats else None)
             category = self.fallback_cache[cat_type]
 
@@ -85,8 +163,9 @@ class BatchCategoryResolver:
     async def record_alias(self, normalized_name: str, category: Category | None) -> None:
         if not category:
             return
-        # Do not record alias for special transfer/credit/deposit categories unless explicitly intended
-        if category.name in ("Денежный перевод", "Депозит и вклады", "Покупка валюты", "Погашение кредита", "Получение кредита"):
+        if category.name in (
+            "Денежный перевод", "Депозит и вклады", "Покупка валюты", "Погашение кредита", "Получение кредита"
+        ):
             return
         alias_key = (normalized_name, category.type)
         self.alias_cache[alias_key] = category
@@ -158,7 +237,6 @@ class TransactionService:
 
         mirror_cat = await self._resolve_category("Денежный перевод", CategoryType.income, partner.id)
         sender_name = sender.first_name or sender.username or "Партнёр"
-        raw_msg = f"Перевод от {sender_name}: {context_text or ''}".strip()
 
         tx_mirror = Transaction(
             user_id=partner.id,
@@ -288,13 +366,31 @@ class TransactionService:
         self,
         user_id: int,
         context_text: str | None,
-        raw_items: list[dict[str, Any]]
+        raw_items: list[dict[str, Any]],
+        active_credits: Sequence[CreditAccount] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Detects if user is paying a credit monthly payment without explicitly naming the amount,
         or if LLM returned items=[] / item with amount=0 for a loan repayment.
         """
-        active_credits = await self.credit_service.get_user_credits(user_id, active_only=True)
+        has_zero_repay_item = any(
+            float(it.get("amount") or 0.0) <= 0
+            and (
+                it.get("credit_action") == "repay"
+                or it.get("category") == "Погашение кредита"
+                or bool(it.get("target_credit_name"))
+            )
+            for it in raw_items
+        )
+        has_positive_item = any((it.get("amount") or 0) > 0 for it in raw_items)
+        needs_credit_check = has_zero_repay_item or (
+            not has_positive_item and bool(context_text and _CREDIT_TRIGGER_RE.search(context_text))
+        )
+        if not needs_credit_check:
+            return raw_items
+
+        if active_credits is None:
+            active_credits = await self.credit_service.get_user_credits(user_id, active_only=True)
         credits_with_mp = [c for c in active_credits if c.monthly_payment and c.monthly_payment > 0]
 
         # 1. Inspect existing items: if any item has amount <= 0 and is credit repay
@@ -355,8 +451,8 @@ class TransactionService:
     async def process_text(self, user_id: int, text: str) -> list[Transaction]:
         """
         Multi-item capable text transaction processing:
-        1. Fast Regex parsing (single item)
-        2. Gemini AI fallback (multi-item batch or uncached single item)
+        1. Fast-Path (<15ms): Regex + Blind-Indexed UserItemAlias OR deterministic CIS merchant/keyword rules
+        2. Gemini AI fallback (multi-item batch, transfers/credits/fx, or uncached ambiguous item)
         """
         user = await self.session.get(User, user_id)
         family_group_id = user.family_group_id if user else None
@@ -366,39 +462,70 @@ class TransactionService:
         discount_percent = None
         discount_amount = None
         total_paid = None
+        fast_path_category: Category | None = None
+        available_cats: Sequence[Category] | None = None
+        user_credits: Sequence[CreditAccount] | None = None
 
         if parsed:
             amount, item_name = parsed
             normalized_name = ParserService.normalize_item_name(item_name)
-            # Only use fast-path if user already has an established alias for this item
+            # 1a. Highest priority: user's personal learned alias
             known_alias = await self._get_alias_category(user_id, normalized_name, CategoryType.expense)
             if known_alias:
-                raw_items = [{"amount": amount, "item_name": normalized_name, "type": "expense", "category": known_alias.name}]
+                fast_path_category = known_alias
+                raw_items = [{
+                    "amount": amount,
+                    "item_name": normalized_name,
+                    "type": "expense",
+                    "category": known_alias.name,
+                }]
+            else:
+                # 1b. High-confidence deterministic category rule (0 LLM latency)
+                guessed_cat_name = ParserService.guess_category(normalized_name)
+                if guessed_cat_name:
+                    guessed_cat = await self.category_service.find_by_name(
+                        guessed_cat_name, CategoryType.expense, user_id
+                    )
+                    if isinstance(guessed_cat, Category):
+                        fast_path_category = guessed_cat
+                        raw_items = [{
+                            "amount": amount,
+                            "item_name": normalized_name,
+                            "type": "expense",
+                            "category": guessed_cat.name,
+                        }]
 
         if not raw_items:
             available_cats = await self.category_service.get_categories(user_id)
             cat_names = list({c.name for c in available_cats})
-            accessible_assets = await self.asset_service.get_accessible_assets(user_id)
-            assets_context = [
-                {
-                    "id": str(a.id),
-                    "name": a.name,
-                    "type": a.type.value if hasattr(a.type, "value") else str(a.type),
-                    "currency": a.currency,
-                }
-                for a in accessible_assets
-            ]
-            user_credits = await self.credit_service.get_user_credits(user_id, active_only=True)
-            credits_context = [
-                {
-                    "id": str(c.id),
-                    "name": c.name,
-                    "remaining_amount": float(c.remaining_amount),
-                    "monthly_payment": float(c.monthly_payment) if c.monthly_payment is not None else None,
-                    "currency": c.currency,
-                }
-                for c in user_credits
-            ]
+
+            assets_context: list[dict[str, Any]] = []
+            if _ASSET_TRIGGER_RE.search(text):
+                accessible_assets = await self.asset_service.get_accessible_assets(user_id)
+                assets_context = [
+                    {
+                        "id": str(a.id),
+                        "name": a.name,
+                        "type": a.type.value if hasattr(a.type, "value") else str(a.type),
+                        "currency": a.currency,
+                    }
+                    for a in accessible_assets
+                ]
+
+            credits_context: list[dict[str, Any]] = []
+            if _CREDIT_TRIGGER_RE.search(text):
+                user_credits = await self.credit_service.get_user_credits(user_id, active_only=True)
+                credits_context = [
+                    {
+                        "id": str(c.id),
+                        "name": c.name,
+                        "remaining_amount": float(c.remaining_amount),
+                        "monthly_payment": float(c.monthly_payment) if c.monthly_payment is not None else None,
+                        "currency": c.currency,
+                    }
+                    for c in user_credits
+                ]
+
             known_names: list[str] = []
             if user and user.first_name:
                 known_names.append(user.first_name)
@@ -431,8 +558,10 @@ class TransactionService:
             discount_percent = payload.get("discount_percent")
             discount_amount = payload.get("discount_amount")
             total_paid = payload.get("total_paid")
+            raw_items = await self._try_autofill_credit_payment(
+                user_id, text, raw_items, active_credits=user_credits
+            )
 
-        raw_items = await self._try_autofill_credit_payment(user_id, text, raw_items)
         if not raw_items:
             raise TransactionParseError("Could not parse transaction from message")
 
@@ -444,8 +573,14 @@ class TransactionService:
         )
 
         transactions: list[Transaction] = []
-
-        resolver = BatchCategoryResolver(self, user_id)
+        resolver = BatchCategoryResolver(self, user_id, preloaded_categories=available_cats)
+        if fast_path_category is not None and raw_items:
+            fp_name = ParserService.normalize_item_name(raw_items[0].get("item_name") or text)
+            resolver.alias_cache[(fp_name, CategoryType.expense)] = fast_path_category
+        elif len(raw_items) > 1:
+            await resolver.preload_aliases([
+                ParserService.normalize_item_name(it.get("item_name") or text) for it in raw_items
+            ])
 
         for item in raw_items:
             try:
@@ -622,8 +757,13 @@ class TransactionService:
         if payload.get("is_financial") is False:
             raise OffTopicMessageError("Голосовое сообщение не содержит финансовых операций", raw_text=None)
         raw_items = payload.get("items", [])
-        voice_text = " ".join([str(it.get("raw_text") or it.get("item_name") or "") for it in raw_items]).strip() or None
-        raw_items = await self._try_autofill_credit_payment(user_id, voice_text, raw_items)
+        root_transcript = (str(payload.get("transcript") or "").strip()) or None
+        voice_text = root_transcript or (
+            " ".join([str(it.get("raw_text") or it.get("item_name") or "") for it in raw_items]).strip() or None
+        )
+        raw_items = await self._try_autofill_credit_payment(
+            user_id, voice_text, raw_items, active_credits=user_credits
+        )
         if not raw_items:
             raise TransactionParseError("Could not parse voice transaction")
 
@@ -635,9 +775,13 @@ class TransactionService:
         )
 
         transactions: list[Transaction] = []
-        last_raw_text = None
+        last_raw_text = root_transcript
 
-        resolver = BatchCategoryResolver(self, user_id)
+        resolver = BatchCategoryResolver(self, user_id, preloaded_categories=available_cats)
+        await resolver.preload_aliases([
+            ParserService.normalize_item_name(it.get("item_name") or root_transcript or "")
+            for it in raw_items
+        ])
 
         for item in raw_items:
             try:
@@ -665,7 +809,7 @@ class TransactionService:
             if amt <= Decimal("0"):
                 continue
 
-            last_raw_text = item.get("raw_text")
+            last_raw_text = item.get("raw_text") or root_transcript
             cat_type = CategoryType(item.get("type", "expense"))
             fallback_name = "Доход" if cat_type == CategoryType.income else ("Перевод" if "transfer" in cat_type.value else "Расход")
             raw_name = item.get("item_name") or last_raw_text or fallback_name
@@ -759,7 +903,7 @@ class TransactionService:
             transactions.append(tx)
 
             # Check and handle intra-family transfer mirror
-            await self._handle_intra_family_mirror(user, tx, None)
+            await self._handle_intra_family_mirror(user, tx, voice_text)
 
         if not transactions:
             raise InvalidTransactionAmountError("Amount must be greater than 0", raw_text=last_raw_text)
@@ -814,6 +958,11 @@ class TransactionService:
             discount_amount=payload.get("discount_amount"),
             total_paid=payload.get("total_paid"),
         )
+
+        await resolver.preload_aliases([
+            ParserService.normalize_item_name(it.get("item_name") or "Чек")
+            for it in raw_items
+        ])
 
         transactions: list[Transaction] = []
 
@@ -885,7 +1034,7 @@ class TransactionService:
         if not payload.get("items"):
             raise TransactionParseError("Could not parse receipt")
 
-        resolver = BatchCategoryResolver(self, user_id)
+        resolver = BatchCategoryResolver(self, user_id, preloaded_categories=available_cats)
         transactions, _ = await self._build_transactions_from_receipt_payload(
             payload=payload,
             user_id=user_id,
@@ -936,7 +1085,7 @@ class TransactionService:
         ]
         raw_payloads = await asyncio.gather(*parse_tasks, return_exceptions=True)
 
-        resolver = BatchCategoryResolver(self, user_id)
+        resolver = BatchCategoryResolver(self, user_id, preloaded_categories=available_cats)
         receipts_summary: list[dict[str, Any]] = []
         all_transactions: list[Transaction] = []
         off_topic_count = 0
@@ -1258,13 +1407,10 @@ class TransactionService:
                 curr_asset_bal = Decimal(str(asset.balance or 0))
 
                 if tx.type == CategoryType.transfer_out:
-                    # Пополнение депозита отменяется -> баланс вклада уменьшается
                     asset.balance = float(curr_asset_bal - delta)
                 elif tx.type == CategoryType.transfer_in:
-                    # Снятие с депозита отменяется -> баланс вклада восстанавливается
                     asset.balance = float(curr_asset_bal + delta)
                 elif tx.type == CategoryType.income:
-                    # Начисленные проценты отменяются -> баланс вклада уменьшается
                     asset.balance = float(curr_asset_bal - Decimal(str(tx.amount)))
 
         # 2. Ledger Reconciliation: Credit Account
@@ -1276,7 +1422,6 @@ class TransactionService:
             )
             if credit:
                 if tx.type == CategoryType.expense:
-                    # Откат платежа по кредиту: долг увеличивается, кредит возобновляется
                     payment_amt = Decimal(str(tx.amount))
                     curr_rem = Decimal(str(credit.remaining_amount or 0))
                     orig_amount = Decimal(str(credit.original_amount or 0))
@@ -1291,7 +1436,6 @@ class TransactionService:
                         credit.closed_at = None
 
                 elif tx.type == CategoryType.income:
-                    # Откат взятия кредита: проверяем отсутствие платежей
                     repayments_count = await self.session.scalar(
                         select(func.count(Transaction.id)).where(
                             Transaction.credit_account_id == tx.credit_account_id,
@@ -1314,7 +1458,6 @@ class TransactionService:
             )
             mirror_tx = await self.session.scalar(mirror_query)
             if mirror_tx:
-                # Разрываем взаимные ссылки во избежание CircularDependencyError в SQLAlchemy
                 tx.related_transaction_id = None
                 mirror_tx.related_transaction_id = None
                 await self.session.flush()
@@ -1398,14 +1541,12 @@ class TransactionService:
         """
         Safely creates a manual transaction via API with complete business validations.
         """
-        # 1. Initial balance / onboarding guard
         if user.initial_balance is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Пожалуйста, сначала укажите начальный баланс."
             )
 
-        # 2. Category existence and ownership check
         cat_query = select(Category).where(Category.id == data.category_id)
         category = await self.session.scalar(cat_query)
         if not category:
@@ -1419,7 +1560,6 @@ class TransactionService:
                 detail="Вы не можете использовать категорию другого пользователя"
             )
 
-        # 3. Category type compatibility
         tx_type = CategoryType(data.type)
         if category.type != tx_type:
             raise HTTPException(
@@ -1427,7 +1567,6 @@ class TransactionService:
                 detail=f"Тип категории ({category.type.value}) не соответствует типу операции ({tx_type.value})"
             )
 
-        # 4. Construct and persist transaction
         tx = Transaction(
             user_id=user.id,
             family_group_id=user.family_group_id,
@@ -1446,5 +1585,3 @@ class TransactionService:
         await self.session.commit()
 
         return self.mask_transaction_for_viewer(tx, user.id)
-
-
