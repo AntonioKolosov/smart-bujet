@@ -42,3 +42,21 @@ class MonthlyAnalyticsResponse(BaseModel):
     history: list[MonthlyTrendItem]
     metrics: AnalyticsKeyMetrics
 
+class MonthSlotItem(BaseModel):
+    year: int
+    month: int
+    label: str
+
+class CategorySeriesMeta(BaseModel):
+    name: str
+    icon: str
+    color: str
+    total_6m: float
+
+class CategoryMonthlyAnalyticsResponse(BaseModel):
+    currency: str
+    months_count: int
+    months: list[MonthSlotItem]
+    default_category: str | None = None
+    categories: list[CategorySeriesMeta]
+    series_by_category: dict[str, list[float]]

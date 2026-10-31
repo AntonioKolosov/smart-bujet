@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
@@ -9,6 +9,17 @@ from src.models.category import Category, CategoryType
 from src.models.asset import AssetAccount
 from src.models.credit import CreditAccount
 from src.models.user import User
+from src.services.category_service import CategoryService
+
+
+APPROX_RATES_TO_KZT: dict[str, float] = {
+    "KZT": 1.0,
+    "USD": 500.0,
+    "EUR": 540.0,
+    "RUB": 5.3,
+}
+
+CANONICAL_CURRENCY_ORDER: tuple[str, ...] = ("USD", "EUR", "RUB", "KZT")
 
 
 CATEGORY_UI_META: dict[str, dict[str, str]] = {
@@ -70,6 +81,7 @@ class AnalyticsSummaryData:
     runway_months: float
     is_family: bool
     family_members_count: int = 1
+    deposits_by_currency: dict[str, float] = field(default_factory=dict)
 
 
 class ReportService:
@@ -296,6 +308,118 @@ class ReportService:
             "metrics": metrics
         }
 
+    async def get_category_monthly_dynamics(
+        self,
+        user_id: int,
+        family_group_id: UUID | None = None,
+        months_count: int = 6,
+    ) -> dict[str, Any]:
+        """Single-query monthly expense dynamics broken down by category for single-category trend charts."""
+        now = datetime.now(timezone.utc)
+        cur_year, cur_month = now.year, now.month
+        month_keys: list[tuple[int, int]] = []
+        for i in range(months_count - 1, -1, -1):
+            y = cur_year
+            m = cur_month - i
+            while m <= 0:
+                m += 12
+                y -= 1
+            month_keys.append((y, m))
+
+        first_y, first_m = month_keys[0]
+        start_date = datetime(first_y, first_m, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+        conditions = [
+            Transaction.transaction_date >= start_date,
+            Transaction.type == CategoryType.expense,
+            Transaction.related_transaction_id.is_(None),
+        ]
+        if family_group_id:
+            conditions.append(Transaction.family_group_id == family_group_id)
+        else:
+            conditions.append(Transaction.user_id == user_id)
+
+        month_trunc = func.date_trunc("month", Transaction.transaction_date)
+        query = (
+            select(
+                month_trunc.label("m_date"),
+                Category.name.label("cat_name"),
+                func.coalesce(func.sum(Transaction.amount), 0).label("total"),
+            )
+            .join(Category, Transaction.category_id == Category.id)
+            .where(and_(*conditions))
+            .group_by("m_date", Category.name)
+            .order_by("m_date")
+        )
+        rows = (await self.session.execute(query)).all()
+
+        cat_month_map: dict[str, dict[tuple[int, int], float]] = {}
+        for r in rows:
+            d = r.m_date
+            cat_name = str(r.cat_name)
+            cat_month_map.setdefault(cat_name, {})[(d.year, d.month)] = float(r.total or 0.0)
+
+        available_cats = await CategoryService(self.session).get_categories(
+            user_id=user_id,
+            cat_type=CategoryType.expense,
+        )
+        all_names: set[str] = {c.name for c in available_cats if getattr(c, "name", None)}
+        all_names.update(cat_month_map.keys())
+        if not all_names:
+            all_names.add("Продукты")
+
+        raw_totals: dict[str, tuple[list[float], float]] = {}
+        for name in all_names:
+            m_dict = cat_month_map.get(name, {})
+            series = [round(m_dict.get(mk, 0.0), 2) for mk in month_keys]
+            raw_totals[name] = (series, round(sum(series), 2))
+
+        sorted_names = sorted(
+            all_names,
+            key=lambda n: (
+                0 if raw_totals[n][1] > 0 else 1,
+                -raw_totals[n][1],
+                0 if n == "Продукты" else 1,
+                n,
+            ),
+        )
+
+        categories_list: list[dict[str, Any]] = []
+        series_by_category: dict[str, list[float]] = {}
+        for idx, name in enumerate(sorted_names):
+            series, total_6m = raw_totals[name]
+            meta = get_category_ui_meta(name, idx)
+            series_by_category[name] = series
+            categories_list.append({
+                "name": name,
+                "icon": meta["icon"],
+                "color": meta["color"],
+                "total_6m": total_6m,
+            })
+
+        default_category: str | None = None
+        if categories_list:
+            if categories_list[0]["total_6m"] > 0:
+                default_category = categories_list[0]["name"]
+            elif "Продукты" in series_by_category:
+                default_category = "Продукты"
+            else:
+                default_category = categories_list[0]["name"]
+
+        months_meta = [
+            {"year": y, "month": m, "label": MONTH_SHORT_RU[m]}
+            for (y, m) in month_keys
+        ]
+
+        return {
+            "currency": "KZT",
+            "months_count": months_count,
+            "months": months_meta,
+            "default_category": default_category,
+            "categories": categories_list,
+            "series_by_category": series_by_category,
+        }
+
     @staticmethod
     def get_period_bounds(period: str, ref_date: datetime | None = None) -> tuple[datetime, datetime, str]:
         """Calculates start_date, end_date and human-readable label in UTC."""
@@ -327,12 +451,13 @@ class ReportService:
         Executes single-pass SQL aggregations for:
         1. Period cashflow (income, expense, savings).
         2. Top category breakdown & share.
-        3. Balance snapshot (liquid, deposits, credits, runway).
+        3. Balance snapshot (liquid, multi-currency deposits, credits, runway).
         """
         start_date, end_date, period_label = self.get_period_bounds(period, ref_date)
 
         user = await self.session.get(User, user_id)
         currency = user.currency if user else "KZT"
+        base_curr = (currency or "KZT").upper()
         is_family = bool(family_group_id)
 
         if is_family:
@@ -406,10 +531,41 @@ class ReportService:
         )
 
         deposit_query = (
-            select(func.coalesce(func.sum(AssetAccount.balance), 0))
+            select(
+                AssetAccount.currency.label("currency"),
+                func.coalesce(func.sum(AssetAccount.balance), 0).label("total"),
+            )
             .where(AssetAccount.user_id.in_(target_user_ids), AssetAccount.is_active.is_(True))
+            .group_by(AssetAccount.currency)
         )
-        total_deposit_balance = round(float(await self.session.scalar(deposit_query) or 0.0), 2)
+        dep_rows = (await self.session.execute(deposit_query)).all()
+        raw_dep_totals: dict[str, float] = {}
+        for r in dep_rows:
+            code = (getattr(r, "currency", None) or base_curr).strip().upper() or base_curr
+            amt = float(getattr(r, "total", 0.0) or 0.0)
+            raw_dep_totals[code] = raw_dep_totals.get(code, 0.0) + amt
+
+        non_zero_codes = [c for c, v in raw_dep_totals.items() if round(v, 2) > 0]
+        ordered_codes = sorted(
+            non_zero_codes,
+            key=lambda c: (
+                0 if c == base_curr else 1,
+                CANONICAL_CURRENCY_ORDER.index(c) if c in CANONICAL_CURRENCY_ORDER else 99,
+                c,
+            ),
+        )
+        deposits_by_currency: dict[str, float] = {
+            c: round(raw_dep_totals[c], 2) for c in ordered_codes
+        }
+
+        base_rate = APPROX_RATES_TO_KZT.get(base_curr, 1.0)
+        total_deposit_balance = round(
+            sum(
+                amt * APPROX_RATES_TO_KZT.get(code, 1.0) / base_rate
+                for code, amt in deposits_by_currency.items()
+            ),
+            2,
+        )
 
         credit_query = (
             select(
@@ -461,8 +617,6 @@ class ReportService:
             debt_burden_ratio=debt_burden_ratio,
             runway_months=runway_months,
             is_family=is_family,
-            family_members_count=family_members_count
+            family_members_count=family_members_count,
+            deposits_by_currency=deposits_by_currency,
         )
-
-
-

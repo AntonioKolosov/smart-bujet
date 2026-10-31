@@ -456,11 +456,26 @@ class AIService:
         return await asyncio.gather(*tasks)
 
     @staticmethod
+    def _extract_deposits_by_currency(summary: Any) -> dict[str, float]:
+        raw_deps = getattr(summary, "deposits_by_currency", None)
+        if not isinstance(raw_deps, dict):
+            return {}
+        dep_map: dict[str, float] = {}
+        for k, v in raw_deps.items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and round(float(v), 2) > 0:
+                code = str(k).strip().upper()
+                if code:
+                    dep_map[code] = round(dep_map.get(code, 0.0) + float(v), 2)
+        return dep_map
+
+    @classmethod
     def _build_advice_cache_key(
+        cls,
         user_id: int,
         summary: Any,
         user_facts: list[str] | None,
     ) -> tuple[Any, ...]:
+        dep_map = cls._extract_deposits_by_currency(summary)
         return (
             user_id,
             getattr(summary, "period", "month"),
@@ -470,6 +485,7 @@ class AIService:
             round(float(getattr(summary, "total_expense", 0.0) or 0.0), 2),
             round(float(getattr(summary, "current_liquid_balance", 0.0) or 0.0), 2),
             round(float(getattr(summary, "total_deposit_balance", 0.0) or 0.0), 2),
+            tuple(sorted(dep_map.items())),
             round(float(getattr(summary, "total_credit_debt", 0.0) or 0.0), 2),
             getattr(summary, "top_category_name", None),
             tuple(user_facts or ()),
@@ -504,6 +520,7 @@ class AIService:
         if not client:
             return self._generate_rule_based_advice(summary)
 
+        dep_map = self._extract_deposits_by_currency(summary)
         payload = {
             "period": getattr(summary, "period", "month"),
             "period_label": getattr(summary, "period_label", ""),
@@ -527,6 +544,8 @@ class AIService:
             "runway_months": getattr(summary, "runway_months", 0.0),
             "is_family": getattr(summary, "is_family", False)
         }
+        if dep_map:
+            payload["deposits_by_currency"] = dep_map
 
         facts_block = ""
         if user_facts:

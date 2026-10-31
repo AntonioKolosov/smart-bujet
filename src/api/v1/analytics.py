@@ -3,7 +3,12 @@ from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_db, get_current_user
-from src.schemas.analytics import ReportResponse, CategoryAnalyticsResponse, MonthlyAnalyticsResponse
+from src.schemas.analytics import (
+    ReportResponse,
+    CategoryAnalyticsResponse,
+    MonthlyAnalyticsResponse,
+    CategoryMonthlyAnalyticsResponse,
+)
 from src.models.user import User
 from src.services.report_service import ReportService
 
@@ -96,3 +101,21 @@ async def get_monthly_analytics(
     return data
 
 
+@router.get("/category-monthly", response_model=CategoryMonthlyAnalyticsResponse)
+async def get_category_monthly_analytics(
+    family: bool = Query(False, description="Family mode analytics"),
+    months: int = Query(6, ge=1, le=24, description="Number of months to trend"),
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    service = ReportService(session)
+    family_id = None
+    if family:
+        family_id = await _verify_family_access(current_user, session)
+    data = await service.get_category_monthly_dynamics(
+        user_id=current_user.id,
+        family_group_id=family_id,
+        months_count=months
+    )
+    data["currency"] = current_user.currency or "KZT"
+    return data

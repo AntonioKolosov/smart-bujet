@@ -7,7 +7,7 @@
   <!-- Preconnect to Telegram CDN -->
   <link rel="preconnect" href="https://telegram.org">
   <link rel="dns-prefetch" href="https://telegram.org">
-  <link rel="stylesheet" href="/static/styles.css?v=2.25">
+  <link rel="stylesheet" href="/static/styles.css?v=2.26">
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
@@ -293,6 +293,26 @@
             <span class="period-badge">Полгода</span>
           </div>
           <div class="bar-chart-wrap" id="barChartContainer"></div>
+        </div>
+
+        <!-- Chart 3: Bar Chart - Single Category Monthly Dynamics (6 months) -->
+        <div class="chart-card">
+          <div class="chart-header">
+            <h3 class="chart-title">Динамика по категории</h3>
+            <button type="button" id="analyticsCategoryBtn" class="analytics-cat-btn" aria-haspopup="dialog">
+              <span>Категория</span>
+              <span class="analytics-cat-btn-arrow">▾</span>
+            </button>
+          </div>
+          <div class="analytics-selected-cat-bar" id="analyticsSelectedCatBar" role="button" tabindex="0">
+            <div class="analytics-selected-cat-left">
+              <span class="legend-color-dot" id="analyticsSelectedCatDot"></span>
+              <span class="analytics-selected-cat-icon" id="analyticsSelectedCatIcon">🛒</span>
+              <span class="analytics-selected-cat-name" id="analyticsSelectedCatName">Продукты</span>
+            </div>
+            <span class="analytics-selected-cat-total" id="analyticsSelectedCatTotal">0 ₸</span>
+          </div>
+          <div class="bar-chart-wrap" id="categoryBarChartContainer"></div>
         </div>
       </div>
     </section>
@@ -717,6 +737,6 @@
     </button>
   </nav>
 
-  <script src="/static/app.js?v=2.25"></script>
+  <script src="/static/app.js?v=2.26"></script>
 </body>
 </html>

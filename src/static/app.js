@@ -140,6 +140,14 @@
   const donutChartContainer = document.getElementById('donutChartContainer');
   const categoryLegendList = document.getElementById('categoryLegendList');
   const barChartContainer = document.getElementById('barChartContainer');
+  const analyticsCategoryBtn = document.getElementById('analyticsCategoryBtn');
+  const analyticsSelectedCatBar = document.getElementById('analyticsSelectedCatBar');
+  const analyticsSelectedCatDot = document.getElementById('analyticsSelectedCatDot');
+  const analyticsSelectedCatIcon = document.getElementById('analyticsSelectedCatIcon');
+  const analyticsSelectedCatName = document.getElementById('analyticsSelectedCatName');
+  const analyticsSelectedCatTotal = document.getElementById('analyticsSelectedCatTotal');
+  const categoryBarChartContainer = document.getElementById('categoryBarChartContainer');
+  const categorySheetTitleEl = document.querySelector('#categorySheetContainer .sheet-title');
 
   let currentOpsMode = 'personal';
   let currentAnalyticsMode = 'personal';
@@ -1280,12 +1288,32 @@
     if (selectedCategoryDot) selectedCategoryDot.style.backgroundColor = meta.color;
   }
 
-  function openCategorySheet() {
+  let activeCategorySheetConfig = null;
+
+  function getDefaultModalSheetConfig() {
+    return {
+      title: 'Выбор категории',
+      categories: currentModalCategories,
+      autoFocus: true,
+      showAmount: false,
+      isSelected: (cat) => cat.id === Number(editTxCategoryValue?.value),
+      onSelect: (cat) => setCategoryPickerSelection(cat.id, cat.name)
+    };
+  }
+
+  function openCategorySheet(opts) {
     if (!categorySheetOverlay) return;
-    renderCategorySheetList(currentModalCategories);
+    const isCustom = Boolean(opts && typeof opts === 'object' && !('target' in opts));
+    activeCategorySheetConfig = isCustom ? opts : getDefaultModalSheetConfig();
+    if (categorySheetTitleEl) {
+      categorySheetTitleEl.textContent = activeCategorySheetConfig.title || 'Выбор категории';
+    }
+    renderCategorySheetList(activeCategorySheetConfig.categories || []);
     if (categorySearchInput) categorySearchInput.value = '';
     categorySheetOverlay.classList.remove('hidden');
-    if (categorySearchInput) setTimeout(() => categorySearchInput.focus(), 80);
+    if (activeCategorySheetConfig.autoFocus && categorySearchInput) {
+      setTimeout(() => categorySearchInput.focus(), 80);
+    }
   }
 
   function closeCategorySheet() {
@@ -1296,7 +1324,7 @@
   function renderCategorySheetList(categories) {
     if (!categorySheetList) return;
     categorySheetList.innerHTML = '';
-    const selectedId = Number(editTxCategoryValue?.value);
+    const cfg = activeCategorySheetConfig || getDefaultModalSheetConfig();
 
     if (!categories || categories.length === 0) {
       categorySheetList.innerHTML = `
@@ -1309,23 +1337,35 @@
     }
 
     categories.forEach(cat => {
-      const meta = getCategoryMeta(cat.name);
-      const isSelected = cat.id === selectedId;
+      const fallbackMeta = getCategoryMeta(cat.name);
+      const meta = {
+        icon: cat.icon || fallbackMeta.icon,
+        color: cat.color || fallbackMeta.color
+      };
+      const isSelected = typeof cfg.isSelected === 'function'
+        ? Boolean(cfg.isSelected(cat))
+        : (cat.id === Number(editTxCategoryValue?.value));
       const item = document.createElement('div');
       item.className = `category-sheet-item ${isSelected ? 'selected' : ''}`;
       const iconBg = meta.color ? `${meta.color}22` : 'rgba(255, 255, 255, 0.06)';
+      const amountHtml = (cfg.showAmount && Number(cat.total_6m) > 0)
+        ? `<span class="sheet-item-amount">${formatMoney(cat.total_6m)}</span>`
+        : '';
       item.innerHTML = `
         <div class="sheet-item-icon-wrap" style="background: ${iconBg};">
           <span class="sheet-item-icon">${meta.icon}</span>
         </div>
         <span class="sheet-item-name">${escapeHtml(cat.name)}</span>
+        ${amountHtml}
         ${isSelected ? '<span class="sheet-item-check">✓</span>' : ''}
       `;
       item.addEventListener('click', () => {
         if (tg?.HapticFeedback?.selectionChanged) {
           tg.HapticFeedback.selectionChanged();
         }
-        setCategoryPickerSelection(cat.id, cat.name);
+        if (typeof cfg.onSelect === 'function') {
+          cfg.onSelect(cat);
+        }
         closeCategorySheet();
       });
       categorySheetList.appendChild(item);
@@ -1335,7 +1375,9 @@
   if (categorySearchInput) {
     categorySearchInput.addEventListener('input', (e) => {
       const q = e.target.value.toLowerCase().trim();
-      const filtered = currentModalCategories.filter(c => c.name.toLowerCase().includes(q));
+      const cfg = activeCategorySheetConfig || getDefaultModalSheetConfig();
+      const sourceList = cfg.categories || [];
+      const filtered = sourceList.filter(c => c.name.toLowerCase().includes(q));
       renderCategorySheetList(filtered);
     });
   }
@@ -1991,6 +2033,54 @@
     return Math.round(val).toString();
   }
 
+  const selectedAnalyticsCategory = { personal: null, family: null };
+  let currentCategoryMonthlyData = null;
+
+  function resolveActiveAnalyticsCategory(catMonthData, isFamily) {
+    const modeKey = isFamily ? 'family' : 'personal';
+    const seriesMap = catMonthData?.series_by_category || {};
+    const uid = getUserId();
+    const saved = selectedAnalyticsCategory[modeKey] || safeGetStorage(`sb_analytics_cat_${modeKey}_${uid}`);
+    if (saved && Object.prototype.hasOwnProperty.call(seriesMap, saved)) {
+      selectedAnalyticsCategory[modeKey] = saved;
+      return saved;
+    }
+    const defCat = catMonthData?.default_category || 'Продукты';
+    selectedAnalyticsCategory[modeKey] = defCat;
+    return defCat;
+  }
+
+  function selectAnalyticsCategory(catName) {
+    if (!catName) return;
+    const modeKey = currentAnalyticsMode === 'family' ? 'family' : 'personal';
+    // Strictly bind only ONE category at a time
+    selectedAnalyticsCategory[modeKey] = catName;
+    safeSetStorage(`sb_analytics_cat_${modeKey}_${getUserId()}`, catName);
+    renderCategoryMonthlyChart();
+  }
+
+  function openAnalyticsCategoryPicker() {
+    if (!currentCategoryMonthlyData) return;
+    const cats = currentCategoryMonthlyData.categories || [];
+    const modeKey = currentAnalyticsMode === 'family' ? 'family' : 'personal';
+    const activeCat = selectedAnalyticsCategory[modeKey];
+    openCategorySheet({
+      title: 'Категория расходов',
+      categories: cats,
+      autoFocus: false,
+      showAmount: true,
+      isSelected: (cat) => cat.name === activeCat,
+      onSelect: (cat) => selectAnalyticsCategory(cat.name)
+    });
+  }
+
+  if (analyticsCategoryBtn) {
+    analyticsCategoryBtn.addEventListener('click', openAnalyticsCategoryPicker);
+  }
+  if (analyticsSelectedCatBar) {
+    analyticsSelectedCatBar.addEventListener('click', openAnalyticsCategoryPicker);
+  }
+
   async function fetchAnalytics(isFamily = false) {
     if (!tabAnalytics) return;
     analyticsLoaderEl?.classList.remove('hidden');
@@ -2000,9 +2090,10 @@
 
     try {
       const familyParam = isFamily ? 'true' : 'false';
-      const [catRes, monthRes] = await Promise.all([
+      const [catRes, monthRes, catMonthRes] = await Promise.all([
         fetch(`/api/v1/analytics/categories?family=${familyParam}&period=month`, { headers: getHeaders() }),
-        fetch(`/api/v1/analytics/monthly?family=${familyParam}&months=6`, { headers: getHeaders() })
+        fetch(`/api/v1/analytics/monthly?family=${familyParam}&months=6`, { headers: getHeaders() }),
+        fetch(`/api/v1/analytics/category-monthly?family=${familyParam}&months=6`, { headers: getHeaders() })
       ]);
 
       if (!catRes.ok || !monthRes.ok) {
@@ -2017,6 +2108,8 @@
 
       const catData = await catRes.json();
       const monthData = await monthRes.json();
+      const catMonthData = catMonthRes.ok ? await catMonthRes.json() : null;
+      currentCategoryMonthlyData = catMonthData;
 
       // Key Metrics
       const metrics = monthData.metrics || {};
@@ -2044,6 +2137,8 @@
       // Charts
       renderDonutChart(catData.categories || [], catData.total_spend || 0);
       renderBarChart(monthData.history || []);
+      resolveActiveAnalyticsCategory(catMonthData, isFamily);
+      renderCategoryMonthlyChart();
 
       analyticsContentEl?.classList.remove('hidden');
     } catch (err) {
@@ -2126,16 +2221,20 @@
     `).join('');
   }
 
-  function renderBarChart(history) {
-    if (!barChartContainer) return;
+  function renderMonthlyBarsSvg(containerEl, history, opts = {}) {
+    if (!containerEl) return;
     if (!history || history.length === 0) {
-      barChartContainer.innerHTML = `
+      containerEl.innerHTML = `
         <div class="empty-banner" style="padding: 24px 0;">
           <p class="empty-title">Нет истории трат</p>
           <span class="empty-desc">Данные появятся по мере накопления расходов</span>
         </div>`;
       return;
     }
+
+    const gradientId = opts.gradientId || 'barGradient';
+    const colorTop = opts.colorTop || '#38bdf8';
+    const colorBottom = opts.colorBottom || '#0284c7';
 
     const isLight = document.body.classList.contains('theme-light');
     const svgWidth = 330;
@@ -2168,7 +2267,7 @@
 
       barsSvg += `
         <g class="bar-group">
-          ${exp > 0 ? `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="4" fill="url(#barGradient)" opacity="0.9" />` : `<rect x="${x}" y="${svgHeight - padBottom - 2}" width="${barWidth}" height="2" rx="1" fill="${emptyBarColor}" />`}
+          ${exp > 0 ? `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="4" fill="url(#${gradientId})" opacity="0.9" />` : `<rect x="${x}" y="${svgHeight - padBottom - 2}" width="${barWidth}" height="2" rx="1" fill="${emptyBarColor}" />`}
           <text x="${x + barWidth / 2}" y="${y - 6}" text-anchor="middle" fill="${amountColor}" font-size="10" font-weight="700">${amountText}</text>
           <text x="${x + barWidth / 2}" y="${svgHeight - 10}" text-anchor="middle" fill="${labelColor}" font-size="11" font-weight="600">${label}</text>
         </g>
@@ -2176,18 +2275,70 @@
     });
 
     const baselineY = svgHeight - padBottom;
-    barChartContainer.innerHTML = `
+    containerEl.innerHTML = `
       <svg width="100%" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}" preserveAspectRatio="xMidYMid meet">
         <defs>
-          <linearGradient id="barGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stop-color="#38bdf8" />
-            <stop offset="100%" stop-color="#0284c7" />
+          <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="${colorTop}" />
+            <stop offset="100%" stop-color="${colorBottom}" />
           </linearGradient>
         </defs>
         <line x1="${padX}" y1="${baselineY}" x2="${svgWidth - padX}" y2="${baselineY}" stroke="${baselineColor}" stroke-width="1" />
         ${barsSvg}
       </svg>
     `;
+  }
+
+  function renderBarChart(history) {
+    renderMonthlyBarsSvg(barChartContainer, history, {
+      gradientId: 'barGradient',
+      colorTop: '#38bdf8',
+      colorBottom: '#0284c7'
+    });
+  }
+
+  function renderCategoryMonthlyChart() {
+    if (!categoryBarChartContainer) return;
+    if (!currentCategoryMonthlyData || !currentCategoryMonthlyData.months) {
+      categoryBarChartContainer.innerHTML = `
+        <div class="empty-banner" style="padding: 24px 0;">
+          <p class="empty-title">Нет данных по категории</p>
+          <span class="empty-desc">Выберите категорию для просмотра динамики</span>
+        </div>`;
+      return;
+    }
+
+    const modeKey = currentAnalyticsMode === 'family' ? 'family' : 'personal';
+    const catName = selectedAnalyticsCategory[modeKey] || currentCategoryMonthlyData.default_category || 'Продукты';
+    const cats = currentCategoryMonthlyData.categories || [];
+    const catObj = cats.find(c => c.name === catName);
+    const fallbackMeta = getCategoryMeta(catName);
+    const icon = catObj?.icon || fallbackMeta.icon;
+    const color = catObj?.color || fallbackMeta.color || '#22c55e';
+
+    const series = (currentCategoryMonthlyData.series_by_category && currentCategoryMonthlyData.series_by_category[catName]) || [];
+    const months = currentCategoryMonthlyData.months || [];
+    const total6m = series.reduce((acc, v) => acc + (Number(v) || 0), 0);
+
+    if (analyticsSelectedCatDot) analyticsSelectedCatDot.style.background = color;
+    if (analyticsSelectedCatIcon) analyticsSelectedCatIcon.textContent = icon;
+    if (analyticsSelectedCatName) analyticsSelectedCatName.textContent = catName;
+    if (analyticsSelectedCatTotal) {
+      analyticsSelectedCatTotal.textContent = `Полгода: ${formatMoney(total6m)}`;
+    }
+
+    const historyItems = months.map((m, idx) => ({
+      year: m.year,
+      month: m.month,
+      label: m.label,
+      total_expense: Number(series[idx]) || 0
+    }));
+
+    renderMonthlyBarsSvg(categoryBarChartContainer, historyItems, {
+      gradientId: 'catBarGradient',
+      colorTop: color,
+      colorBottom: color
+    });
   }
 
   refreshBtn.addEventListener('click', () => {
