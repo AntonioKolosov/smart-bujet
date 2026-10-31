@@ -978,9 +978,9 @@ input[type="number"] {
   right: 0;
   background: var(--secondary-bg-color);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  display: flex;
-  justify-content: space-around;
-  padding: 8px 12px calc(var(--safe-bottom) + 8px) 12px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  padding: 6px 4px calc(var(--safe-bottom) + 6px) 4px;
   z-index: 100;
   backdrop-filter: blur(10px);
 }
@@ -992,13 +992,104 @@ input[type="number"] {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  font-size: 0.75rem;
+  justify-content: center;
+  gap: 2px;
+  font-size: 0.62rem;
   font-weight: 500;
   cursor: pointer;
-  padding: 6px 16px;
-  border-radius: 12px;
+  padding: 5px 1px;
+  border-radius: 10px;
   transition: all 0.2s ease;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.nav-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  letter-spacing: -0.2px;
+}
+
+.settings-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--text-color);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.settings-btn:active {
+  transform: scale(0.95);
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.currency-pill-btn {
+  background: var(--secondary-bg-color, #1e293b);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  color: var(--text-color, #f8fafc);
+  padding: 10px 4px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.currency-pill-btn:hover,
+.currency-pill-btn.active {
+  background: var(--button-color, #2563eb);
+  border-color: var(--button-color, #2563eb);
+  color: #ffffff;
+}
+
+.danger-zone-card {
+  margin: 32px 0 20px 0;
+  padding: 16px;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 14px;
+  text-align: center;
+}
+
+.danger-zone-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #ef4444;
+  margin-bottom: 6px;
+}
+
+.danger-zone-desc {
+  font-size: 0.8rem;
+  color: var(--hint-color);
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.danger-zone-btn {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  transition: all 0.2s ease;
+}
+
+.danger-zone-btn:active {
+  background: rgba(239, 68, 68, 0.3);
 }
 
 .nav-icon {
@@ -1911,89 +2002,154 @@ body.theme-light .sheet-item-check {
   }
 }
 
+/* --- Personalization / Facts Tab Styles --- */
+.facts-hero {
+  background: var(--secondary-bg-color);
+  border-radius: 18px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
 
+.facts-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
 
+.facts-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
 
+.facts-subtitle {
+  font-size: 0.8rem;
+  color: var(--hint-color);
+  line-height: 1.35;
+}
 
+.facts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 
+.fact-card {
+  background: var(--secondary-bg-color);
+  border-radius: 16px;
+  padding: 14px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
 
-/* Settings & Danger Zone */
-.settings-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 20px;
-  padding: 4px 10px;
-  font-size: 1.1rem;
-  line-height: 1;
+.fact-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.fact-category-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  width: fit-content;
+}
+
+.fact-category-badge.goal {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+
+.fact-category-badge.habit {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+}
+
+.fact-category-badge.schedule {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.fact-category-badge.constraint {
+  background: rgba(244, 63, 94, 0.15);
+  color: #f87171;
+}
+
+.fact-category-badge.other {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+}
+
+.fact-text {
+  font-size: 0.92rem;
+  line-height: 1.4;
   color: var(--text-color);
-  cursor: pointer;
+  word-break: break-word;
+}
+
+.fact-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.fact-action-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--hint-color);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
-.settings-btn:active {
-  transform: scale(0.95);
-  background: rgba(255, 255, 255, 0.18);
+.fact-action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-color);
 }
 
-.currency-pill-btn {
-  background: var(--secondary-bg-color, #1e293b);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 12px;
-  color: var(--text-color, #f8fafc);
-  padding: 10px 4px;
+.fact-action-btn.delete:hover {
+  background: rgba(244, 63, 94, 0.2);
+  color: #f87171;
+}
+
+
+
+
+
+/* Load more button */
+.load-more-container {
+  display: flex;
+  justify-content: center;
+  padding: 14px 0 24px 0;
+}
+.load-more-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--hint-color);
   font-size: 0.88rem;
   font-weight: 600;
+  padding: 10px 20px;
+  border-radius: 12px;
   cursor: pointer;
-  text-align: center;
   transition: all 0.2s ease;
 }
-
-.currency-pill-btn:hover,
-.currency-pill-btn.active {
-  background: var(--button-color, #2563eb);
-  border-color: var(--button-color, #2563eb);
-  color: #ffffff;
-}
-
-.danger-zone-card {
-  margin: 32px 0 20px 0;
-  padding: 16px;
-  background: rgba(239, 68, 68, 0.06);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  border-radius: 14px;
-  text-align: center;
-}
-
-.danger-zone-title {
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: #ef4444;
-  margin-bottom: 6px;
-}
-
-.danger-zone-desc {
-  font-size: 0.8rem;
-  color: var(--hint-color);
-  margin-bottom: 12px;
-  line-height: 1.4;
-}
-
-.danger-zone-btn {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  border-radius: 10px;
-  padding: 10px 16px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  width: 100%;
-  transition: all 0.2s ease;
-}
-
-.danger-zone-btn:active {
-  background: rgba(239, 68, 68, 0.3);
+.load-more-btn:active {
+  transform: scale(0.97);
+  background: rgba(255, 255, 255, 0.12);
 }

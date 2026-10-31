@@ -14,6 +14,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user import User
+from src.models.agent_memory import UserAgentMemory
 from src.services.report_service import ReportService
 from src.services.ai_service import AIService
 from src.services.transaction_service import TransactionService
@@ -117,6 +118,24 @@ async def cmd_summary(message: Message, session: AsyncSession):
     await message.answer(text, reply_markup=kb)
 
 
+async def _get_user_fact_texts(session: AsyncSession, user_id: int) -> list[str] | None:
+    try:
+        mem_stmt = (
+            select(UserAgentMemory)
+            .where(UserAgentMemory.user_id == user_id, UserAgentMemory.is_active == True)
+            .order_by(UserAgentMemory.created_at.desc())
+        )
+        res = await session.scalars(mem_stmt)
+        items = res.all() if hasattr(res, "all") else []
+        if asyncio.iscoroutine(items):
+            items = await items
+        if isinstance(items, (list, tuple)):
+            return [m.fact_text for m in items if hasattr(m, "fact_text")] or None
+    except Exception:
+        pass
+    return None
+
+
 @router.callback_query(F.data.startswith("sum:"))
 async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
     """
@@ -147,11 +166,7 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
         try:
             await callback.message.edit_text(text, reply_markup=kb)
         except Exception as exc:
-            logger.debug("Could not edit message back to main menu: %s, sending new", exc)
-            try:
-                await callback.message.answer(text, reply_markup=kb)
-            except Exception:
-                pass
+            logger.debug("Could not edit message back to main menu: %s", exc)
         await callback.answer()
         return
 
@@ -202,12 +217,17 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
             await callback.answer(text="Вы не состоите в семейной группе", show_alert=True)
             return
 
+        fact_texts = await _get_user_fact_texts(session, user.id)
         summary = await report_service.get_agent_analytics(
             user_id=user.id,
             family_group_id=user.family_group_id,
             period="month"
         )
-        advice = await ai_service.generate_financial_advice(summary)
+        advice = await ai_service.generate_financial_advice(
+            summary,
+            user_id=user.id,
+            user_facts=fact_texts
+        )
         text = format_summary_card(summary, advice, period_label="на текущую дату")
         kb = summary_card_inline_keyboard(active_scope="f")
 
@@ -223,12 +243,17 @@ async def on_summary_callback(callback: CallbackQuery, session: AsyncSession):
         return
 
     # Scope: Personal
+    fact_texts = await _get_user_fact_texts(session, user.id)
     summary = await report_service.get_agent_analytics(
         user_id=user.id,
         family_group_id=None,
         period="month"
     )
-    advice = await ai_service.generate_financial_advice(summary)
+    advice = await ai_service.generate_financial_advice(
+        summary,
+        user_id=user.id,
+        user_facts=fact_texts
+    )
     text = format_summary_card(summary, advice, period_label="на текущую дату")
     has_fam = await user_has_active_family(session, user)
     kb = summary_card_inline_keyboard(active_scope="p", has_family=has_fam)

@@ -1,10 +1,18 @@
+from __future__ import annotations
+
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command, CommandObject
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    ReplyKeyboardRemove,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
 from src.models.user import User
-from src.core.config import settings
 from src.bot.keyboards.inline import (
     currency_keyboard,
     welcome_back_keyboard,
@@ -21,13 +29,30 @@ from src.services.family_service import FamilyService
 
 router = Router()
 
-def get_miniapp_url() -> str:
-    domain = settings.domain
-    if not domain or domain == "localhost":
-        domain = "85.198.89.188.sslip.io:8443"
-    elif ":" not in domain and "sslip.io" in domain:
-        domain = f"{domain}:8443"
-    return f"https://{domain}/app"
+PRIVACY_AGREEMENT_TEXT = (
+    "🛡 <b>Пользовательское соглашение и политика конфиденциальности</b>\n\n"
+    "Добро пожаловать в <b>Smart Bujet</b>! Перед началом работы ознакомьтесь с правилами обработки и защиты данных:\n\n"
+    "• 🔒 <b>Сквозное шифрование (AES-256-GCM):</b> названия ваших покупок, счетов, фактов и кредитов зашифрованы в базе данных.\n"
+    "• 🛡 <b>Guardrails-маскирование:</b> перед отправкой в AI имена, номера карт, ИИН и телефоны автоматически обезличиваются.\n"
+    "• 🙈 <b>Слепота администратора:</b> ваш @username не сохраняется в базе данных.\n"
+    "• 🗑 <b>Право на забвение:</b> в любой момент команда /delete_account (или кнопка в настройках MiniApp) безвозвратно удаляет профиль и все данные.\n\n"
+    "Нажимая кнопку <b>«✅ Принимаю условия»</b>, вы принимаете пользовательское соглашение и даёте согласие на обработку данных финансовым ассистентом."
+)
+
+
+def privacy_accept_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Принимаю условия", callback_data="privacy:accept")]
+        ]
+    )
+
+
+def _with_page(page: str) -> str:
+    base = get_miniapp_url()
+    sep = "&" if "?" in base else "?"
+    return f"{base}{sep}page={page}"
+
 
 @router.message(Command("miniapp"))
 @router.message(Command("app"))
@@ -38,54 +63,59 @@ async def cmd_miniapp(message: Message):
         reply_markup=miniapp_keyboard(url)
     )
 
+
 @router.message(Command("deposits"))
 @router.message(Command("assets"))
 async def cmd_deposits(message: Message):
-    url = f"{get_miniapp_url()}?page=deposits"
     await message.answer(
         "🏦 <b>Депозиты, сбережения и валютные счета</b>\n\n"
         "Управляйте вашими банковскими вкладами, копилками и валютными счетами во весь экран:",
-        reply_markup=deposits_keyboard(url)
+        reply_markup=deposits_keyboard(_with_page("deposits"))
     )
+
 
 @router.message(Command("credits"))
 @router.message(Command("loans"))
 async def cmd_credits(message: Message):
-    url = f"{get_miniapp_url()}?page=credits"
     await message.answer(
         "💳 <b>Кредиты и займы</b>\n\n"
         "Отслеживайте активные кредиты, остаток долга и график погашения во весь экран:",
-        reply_markup=credits_keyboard(url)
+        reply_markup=credits_keyboard(_with_page("credits"))
     )
+
 
 @router.message(Command("analytics"))
 @router.message(Command("stats"))
 async def cmd_analytics(message: Message):
-    url = f"{get_miniapp_url()}?page=analytics"
     await message.answer(
         "📊 <b>Финансовая аналитика и статистика</b>\n\n"
         "Смотрите круговые диаграммы по категориям трат и помесячную динамику расходов во весь экран:",
-        reply_markup=analytics_keyboard(url)
+        reply_markup=analytics_keyboard(_with_page("analytics"))
     )
+
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, session: AsyncSession, command: CommandObject):
     user_id = message.from_user.id
-    username = message.from_user.username
     first_name = message.from_user.first_name
-    
+
     user = await session.scalar(select(User).where(User.id == user_id))
     is_new_user = False
-    
+
     if not user:
-        user = User(id=user_id, username=None, first_name=first_name, currency="KZT", has_accepted_terms=False)
+        user = User(
+            id=user_id,
+            username=None,
+            first_name=first_name,
+            currency="KZT",
+            has_accepted_terms=False,
+        )
         session.add(user)
         await session.commit()
         is_new_user = True
-    else:
-        user.username = None  # Admin blindness: do not persist username
-        if user.first_name != first_name:
-            user.first_name = first_name
+    elif user.username is not None or user.first_name != first_name:
+        user.username = None  # Admin blindness: never persist @username
+        user.first_name = first_name
         await session.commit()
 
     # Check for Family Invite Deep Link: /start fam_<invite_code>
@@ -96,7 +126,7 @@ async def cmd_start(message: Message, session: AsyncSession, command: CommandObj
 
         if group and partner_id:
             try:
-                author_title = user.first_name or (f"@{user.username}" if user.username else "Партнёр")
+                author_title = user.first_name or "Партнёр"
                 await message.bot.send_message(
                     partner_id,
                     f"🎉 <b>{author_title}</b> присоединился(лась) к вашей семейной группе <b>«{group.name}»</b>!\n\n"
@@ -105,7 +135,15 @@ async def cmd_start(message: Message, session: AsyncSession, command: CommandObj
             except Exception:
                 pass
 
-        family_url = f"{get_miniapp_url()}?page=family"
+        # Mandatory User Agreement check even when entering via family deep link
+        if is_new_user or not getattr(user, "has_accepted_terms", True):
+            await message.answer(
+                f"👨‍👩‍👧‍👦 <b>Семейный бюджет</b>\n\n{feedback_msg}\n\n{PRIVACY_AGREEMENT_TEXT}",
+                reply_markup=privacy_accept_keyboard(),
+            )
+            return
+
+        family_url = _with_page("family")
         if user.initial_balance is None:
             await message.answer(
                 f"👨‍👩‍👧‍👦 <b>Семейный бюджет</b>\n\n{feedback_msg}\n\n{BotMessages.ask_initial_balance()}",
@@ -119,32 +157,24 @@ async def cmd_start(message: Message, session: AsyncSession, command: CommandObj
             )
         return
 
+    # Mandatory User Agreement / Privacy Policy gate for all new or unaccepted users
     if is_new_user or not getattr(user, "has_accepted_terms", True):
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-        privacy_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Принимаю условия", callback_data="privacy:accept")]
-        ])
         await message.answer(
-            f"🛡 <b>Политика конфиденциальности и защита данных</b>\n\n"
-            f"Добро пожаловать в <b>Smart Bujet</b>! Перед началом работы ознакомьтесь с правилами безопасности:\n\n"
-            f"• 🔒 <b>Сквозное шифрование (AES-256-GCM):</b> названия ваших покупок, счетов и кредитов зашифрованы в базе данных.\n"
-            f"• 🛡 <b>Guardrails-маскирование:</b> перед отправкой в AI имена, номера карт и телефоны обезличиваются.\n"
-            f"• 🙈 <b>Слепота администратора:</b> ваш @username не сохраняется в базе данных.\n"
-            f"• 🗑 <b>Право на удаление:</b> в любой момент команда /delete_account безвозвратно удаляет все ваши данные.\n\n"
-            f"Нажимая кнопку ниже, вы соглашаетесь на обработку данных финансовым ассистентом.",
-            reply_markup=privacy_kb
+            PRIVACY_AGREEMENT_TEXT,
+            reply_markup=privacy_accept_keyboard(),
         )
         return
 
+    # Standard onboarding: choose currency -> enter initial balance
     if user.initial_balance is None:
         await message.answer(
-            f"👋 <b>С возвращением, {user.first_name or ''}!</b>\n\n{BotMessages.ask_initial_balance()}",
-            reply_markup=ReplyKeyboardRemove()
+            BotMessages.welcome_new(),
+            reply_markup=currency_keyboard(),
         )
         return
 
     tx_service = TransactionService(session)
-    bal_data = await tx_service.get_user_balance(user.id)
+    bal_data = await tx_service.get_user_balance(user.id, user=user)
     miniapp_url = get_miniapp_url()
 
     # Clear any residual persistent reply keyboard
@@ -163,6 +193,7 @@ async def cmd_start(message: Message, session: AsyncSession, command: CommandObj
         reply_markup=welcome_back_keyboard(miniapp_url=miniapp_url)
     )
 
+
 @router.callback_query(F.data == "change_currency")
 async def on_change_currency(callback: CallbackQuery):
     await callback.message.edit_text(
@@ -176,7 +207,7 @@ async def on_change_currency(callback: CallbackQuery):
 async def process_currency(callback: CallbackQuery, session: AsyncSession):
     currency = callback.data.split("_")[1]
     user_id = callback.from_user.id
-    
+
     user = await session.scalar(select(User).where(User.id == user_id))
     if user:
         user.currency = currency
@@ -208,9 +239,12 @@ async def on_privacy_accept(callback: CallbackQuery, session: AsyncSession):
             reply_markup=currency_keyboard()
         )
     else:
+        tx_service = TransactionService(session)
+        bal_data = await tx_service.get_user_balance(user.id, user=user)
         miniapp_url = get_miniapp_url()
         await callback.message.edit_text(
-            f"✅ Условия конфиденциальности приняты!\n\n{BotMessages.welcome_back(user.first_name, user.currency, 0.0)}",
+            f"✅ Условия пользовательского соглашения приняты!\n\n"
+            f"{BotMessages.welcome_back(user.first_name, user.currency, bal_data['current_balance'])}",
             reply_markup=welcome_back_keyboard(miniapp_url=miniapp_url)
         )
     await callback.answer()
@@ -218,7 +252,6 @@ async def on_privacy_accept(callback: CallbackQuery, session: AsyncSession):
 
 @router.message(Command("delete_account"))
 async def cmd_delete_account(message: Message):
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Да, безвозвратно удалить всё", callback_data="act:delete:confirm")],
         [InlineKeyboardButton(text="🔙 Отмена", callback_data="act:delete:cancel")]
@@ -267,7 +300,8 @@ async def on_delete_confirm(callback: CallbackQuery, session: AsyncSession):
 
     await session.delete(user)
     await session.commit()
-    await callback.message.edit_text("🗑 <b>Ваш аккаунт и все данные успешно и безвозвратно удалены.</b>\n\nЕсли захотите вернуться, просто отправьте /start.")
+    await callback.message.edit_text(
+        "🗑 <b>Ваш аккаунт и все данные успешно и безвозвратно удалены.</b>\n\n"
+        "Если захотите вернуться, просто отправьте /start."
+    )
     await callback.answer()
-
-

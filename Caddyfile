@@ -4,7 +4,27 @@
 }
 
 85.198.89.188.sslip.io {
+    encode zstd gzip
+
+    @static path /static/*
+    header @static Cache-Control "public, max-age=31536000, immutable"
+
+    @app_html path /app / /index.html
+    header @app_html Cache-Control "no-cache, no-store, must-revalidate"
+
     reverse_proxy backend:8000
+}
+
+dev.85.198.89.188.sslip.io {
+    encode zstd gzip
+
+    @static path /static/*
+    header @static Cache-Control "public, max-age=31536000, immutable"
+
+    @app_html path /app / /index.html
+    header @app_html Cache-Control "no-cache, no-store, must-revalidate"
+
+    reverse_proxy smart_bujet_backend_dev:8000
 }
 
 :80 {
@@ -15,4 +35,3 @@
     tls internal
     reverse_proxy backend:8000
 }
-

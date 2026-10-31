@@ -93,10 +93,32 @@
   const navAssetsBtn = document.getElementById('navAssetsBtn');
   const navCreditsBtn = document.getElementById('navCreditsBtn');
   const navAnalyticsBtn = document.getElementById('navAnalyticsBtn');
+  const navFactsBtn = document.getElementById('navFactsBtn');
   const tabOps = document.getElementById('tab-operations');
   const tabAssets = document.getElementById('tab-assets');
   const tabCredits = document.getElementById('tab-credits');
   const tabAnalytics = document.getElementById('tab-analytics');
+  const tabFacts = document.getElementById('tab-facts');
+
+  // Personalization / Facts Elements
+  const addFactBtn = document.getElementById('addFactBtn');
+  const factsLoaderEl = document.getElementById('factsLoader');
+  const factsErrorEl = document.getElementById('factsError');
+  const factsEmptyStateEl = document.getElementById('factsEmptyState');
+  const factsListEl = document.getElementById('factsList');
+
+  const factModal = document.getElementById('factModal');
+  const closeFactModalBtn = document.getElementById('closeFactModalBtn');
+  const cancelFactBtn = document.getElementById('cancelFactBtn');
+  const factForm = document.getElementById('factForm');
+  const factModalTitle = document.getElementById('factModalTitle');
+  const factModalError = document.getElementById('factModalError');
+  const factIdInput = document.getElementById('factIdInput');
+  const factTextInput = document.getElementById('factTextInput');
+  const factCategorySelect = document.getElementById('factCategorySelect');
+  const saveFactBtn = document.getElementById('saveFactBtn');
+  const deleteFactRow = document.getElementById('deleteFactRow');
+  const deleteFactBtn = document.getElementById('deleteFactBtn');
 
   // Operations Mode Switcher Elements
   const btnOpsPersonal = document.getElementById('btnOpsPersonal');
@@ -302,10 +324,14 @@
 
   // --- Tab Navigation & Mode Switchers ---
   function switchTab(tabId) {
-    [tabOps, tabAssets, tabCredits, tabAnalytics].forEach(t => t && t.classList.remove('active'));
-    [navOpsBtn, navAssetsBtn, navCreditsBtn, navAnalyticsBtn].forEach(b => b && b.classList.remove('active'));
+    [tabOps, tabAssets, tabCredits, tabAnalytics, tabFacts].forEach(t => t && t.classList.remove('active'));
+    [navOpsBtn, navAssetsBtn, navCreditsBtn, navAnalyticsBtn, navFactsBtn].forEach(b => b && b.classList.remove('active'));
 
-    if (tabId === 'tab-analytics') {
+    if (tabId === 'tab-facts') {
+      if (tabFacts) tabFacts.classList.add('active');
+      if (navFactsBtn) navFactsBtn.classList.add('active');
+      fetchFacts();
+    } else if (tabId === 'tab-analytics') {
       if (tabAnalytics) tabAnalytics.classList.add('active');
       if (navAnalyticsBtn) navAnalyticsBtn.classList.add('active');
       fetchAnalytics(currentAnalyticsMode === 'family');
@@ -367,8 +393,87 @@
   if (navAssetsBtn) navAssetsBtn.addEventListener('click', () => switchTab('tab-assets'));
   if (navCreditsBtn) navCreditsBtn.addEventListener('click', () => switchTab('tab-credits'));
   if (navAnalyticsBtn) navAnalyticsBtn.addEventListener('click', () => switchTab('tab-analytics'));
+  if (navFactsBtn) navFactsBtn.addEventListener('click', () => switchTab('tab-facts'));
+
+  // --- LocalStorage SWR Hydration (0 ms First Contentful Paint) ---
+  function getUserId() {
+    try {
+      const initData = getInitData();
+      if (initData) {
+        const params = new URLSearchParams(initData);
+        const userJson = params.get('user');
+        if (userJson) {
+          const userObj = JSON.parse(userJson);
+          if (userObj.id) return String(userObj.id);
+        }
+      }
+      if (tg?.initDataUnsafe?.user?.id) {
+        return String(tg.initDataUnsafe.user.id);
+      }
+    } catch (_) {}
+    return 'default';
+  }
+
+  function safeGetStorage(key) {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        return window.localStorage.getItem(key);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function safeSetStorage(key, val) {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(key, val);
+      }
+    } catch (_) {}
+  }
+
+  function hydrateFromLocalStorage() {
+    const uid = getUserId();
+    try {
+      const rawProfile = safeGetStorage('sb_cached_profile_' + uid);
+      if (rawProfile) {
+        const data = JSON.parse(rawProfile);
+        userCurrency = data.currency || 'KZT';
+        currencySymbol = CURRENCY_SYMBOLS[userCurrency] || userCurrency;
+        if (data.first_name) userGreetingEl.textContent = `Привет, ${data.first_name}!`;
+        if (currencyBadgeEl) {
+          currencyBadgeEl.textContent = `${currencySymbol} ${userCurrency}`;
+        }
+        if (typeof updateSettingsCurrencyUI === 'function') {
+          updateSettingsCurrencyUI(userCurrency);
+        }
+        userLiquidBalance = Number(data.current_balance || 0);
+        currentBalanceEl.textContent = formatMoney(userLiquidBalance);
+        totalExpenseEl.textContent = formatMoney(data.month_expense || 0);
+        totalIncomeEl.textContent = formatMoney(data.month_income || 0);
+        if (data.month_period_name) {
+          expensePeriodLabelEl.textContent = `Расход (${data.month_period_name.toLowerCase()})`;
+          incomePeriodLabelEl.textContent = `Доход (${data.month_period_name.toLowerCase()})`;
+        }
+      }
+
+      const rawTxs = safeGetStorage('sb_cached_txs_' + uid);
+      if (rawTxs) {
+        const txs = JSON.parse(rawTxs);
+        if (Array.isArray(txs) && txs.length > 0) {
+          renderTransactions(txs, false);
+          loaderEl.classList.add('hidden');
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage hydration error:', e);
+    }
+  }
 
   // --- Data Fetching ---
+  let currentTxOffset = 0;
+  const TX_LIMIT = 30;
+  let isFetchingTx = false;
+
   async function fetchProfile() {
     try {
       const res = await fetch('/api/v1/auth/me', { headers: getHeaders() });
@@ -395,6 +500,11 @@
           expensePeriodLabelEl.textContent = `Расход (${data.month_period_name.toLowerCase()})`;
           incomePeriodLabelEl.textContent = `Доход (${data.month_period_name.toLowerCase()})`;
         }
+
+        try {
+          const uid = getUserId();
+          safeSetStorage('sb_cached_profile_' + uid, JSON.stringify(data));
+        } catch (_) {}
       }
     } catch (e) {
       if (currencyBadgeEl) {
@@ -403,14 +513,45 @@
     }
   }
 
-  async function fetchTransactions() {
-    loaderEl.classList.remove('hidden');
-    errorEl.classList.add('hidden');
-    emptyEl.classList.add('hidden');
-    txListEl.innerHTML = '';
+  function attachLoadMoreButton(hasMore) {
+    const existing = document.getElementById('txLoadMoreContainer');
+    if (existing) existing.remove();
+    if (!hasMore) return;
+
+    const container = document.createElement('div');
+    container.id = 'txLoadMoreContainer';
+    container.className = 'load-more-container';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'load-more-btn';
+    btn.textContent = 'Показать ещё';
+    btn.addEventListener('click', () => {
+      btn.textContent = 'Загрузка...';
+      btn.disabled = true;
+      fetchTransactions(true);
+    });
+
+    container.appendChild(btn);
+    txListEl.appendChild(container);
+  }
+
+  async function fetchTransactions(loadMore = false) {
+    if (isFetchingTx) return;
+    isFetchingTx = true;
+
+    if (!loadMore) {
+      currentTxOffset = 0;
+      // If transactions were not yet hydrated from cache, show loader
+      if (txListEl && (!txListEl.children || txListEl.children.length === 0)) {
+        loaderEl.classList.remove('hidden');
+      }
+      errorEl.classList.add('hidden');
+      emptyEl.classList.add('hidden');
+    }
 
     try {
-      const res = await fetch('/api/v1/transactions/?limit=100', { headers: getHeaders() });
+      const res = await fetch(`/api/v1/transactions/?limit=${TX_LIMIT}&offset=${currentTxOffset}`, { headers: getHeaders() });
       if (!res.ok) {
         if (res.status === 401) {
           throw new Error('Требуется авторизация через Telegram MiniApp.');
@@ -418,19 +559,39 @@
         throw new Error(`Ошибка загрузки данных (${res.status})`);
       }
       const transactions = await res.json();
-      renderTransactions(transactions);
+      currentTxOffset += transactions.length;
+
+      if (!loadMore) {
+        txListEl.innerHTML = '';
+        try {
+          const uid = getUserId();
+          safeSetStorage('sb_cached_txs_' + uid, JSON.stringify(transactions));
+        } catch (_) {}
+      }
+
+      renderTransactions(transactions, loadMore);
+      attachLoadMoreButton(transactions.length === TX_LIMIT);
     } catch (err) {
-      errorEl.textContent = err.message || 'Не удалось загрузить транзакции';
-      errorEl.classList.remove('hidden');
+      if (!loadMore) {
+        errorEl.textContent = err.message || 'Не удалось загрузить транзакции';
+        errorEl.classList.remove('hidden');
+      }
     } finally {
       loaderEl.classList.add('hidden');
+      isFetchingTx = false;
     }
   }
 
-  function renderTransactions(transactions) {
-    if (!transactions || transactions.length === 0) {
-      emptyEl.classList.remove('hidden');
-      return;
+  function renderTransactions(transactions, append = false) {
+    if (!append) {
+      if (!transactions || transactions.length === 0) {
+        emptyEl.classList.remove('hidden');
+        txListEl.innerHTML = '';
+        return;
+      }
+      emptyEl.classList.add('hidden');
+    } else {
+      if (!transactions || transactions.length === 0) return;
     }
 
     const groups = {};
@@ -445,10 +606,15 @@
     const fragment = document.createDocumentFragment();
 
     Object.keys(groups).forEach(dateTitle => {
-      const divider = document.createElement('div');
-      divider.className = 'date-divider';
-      divider.textContent = dateTitle;
-      fragment.appendChild(divider);
+      const existingDividers = txListEl.querySelectorAll('.date-divider');
+      const lastDivider = existingDividers.length > 0 ? existingDividers[existingDividers.length - 1] : null;
+
+      if (!append || !lastDivider || lastDivider.textContent !== dateTitle) {
+        const divider = document.createElement('div');
+        divider.className = 'date-divider';
+        divider.textContent = dateTitle;
+        fragment.appendChild(divider);
+      }
 
       groups[dateTitle].forEach(tx => {
         const card = document.createElement('div');
@@ -2036,7 +2202,251 @@
     if (tabAnalytics && tabAnalytics.classList.contains('active')) {
       fetchAnalytics(currentAnalyticsMode === 'family');
     }
+    if (tabFacts && tabFacts.classList.contains('active')) {
+      fetchFacts();
+    }
   });
+
+  // --- Personalization / Facts Domain ---
+  async function fetchFacts() {
+    if (!tabFacts) return;
+    factsLoaderEl?.classList.remove('hidden');
+    factsErrorEl?.classList.add('hidden');
+    factsEmptyStateEl?.classList.add('hidden');
+    if (factsListEl) factsListEl.innerHTML = '';
+
+    try {
+      const res = await fetch('/api/v1/facts/', { headers: getHeaders() });
+      if (!res.ok) {
+        throw new Error('Не удалось загрузить факты');
+      }
+      const data = await res.json();
+      renderFacts(data);
+    } catch (err) {
+      if (factsErrorEl) {
+        factsErrorEl.textContent = err.message || 'Ошибка загрузки фактов';
+        factsErrorEl.classList.remove('hidden');
+      }
+    } finally {
+      factsLoaderEl?.classList.add('hidden');
+    }
+  }
+
+  function renderFacts(facts) {
+    if (!factsListEl) return;
+    factsListEl.innerHTML = '';
+
+    if (!facts || facts.length === 0) {
+      factsEmptyStateEl?.classList.remove('hidden');
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    facts.forEach(f => {
+      const card = document.createElement('div');
+      card.className = 'fact-card';
+
+      const body = document.createElement('div');
+      body.className = 'fact-card-body';
+
+      const badge = document.createElement('span');
+      badge.className = `fact-category-badge ${f.category}`;
+      badge.textContent = f.category_badge || f.category_label || f.category;
+      body.appendChild(badge);
+
+      const text = document.createElement('div');
+      text.className = 'fact-text';
+      text.textContent = f.fact_text;
+      body.appendChild(text);
+
+      const actions = document.createElement('div');
+      actions.className = 'fact-card-actions';
+
+      // Edit button
+      const editBtn = document.createElement('button');
+      editBtn.className = 'fact-action-btn';
+      editBtn.title = 'Редактировать';
+      editBtn.setAttribute('aria-label', 'Редактировать факт');
+      editBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+        </svg>
+      `;
+      editBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openFactModal(f);
+      });
+
+      // Delete button
+      const delBtn = document.createElement('button');
+      delBtn.className = 'fact-action-btn delete';
+      delBtn.title = 'Удалить';
+      delBtn.setAttribute('aria-label', 'Удалить факт');
+      delBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"></polyline>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          <line x1="10" y1="11" x2="10" y2="17"></line>
+          <line x1="14" y1="11" x2="14" y2="17"></line>
+        </svg>
+      `;
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteFactDirect(f);
+      });
+
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+
+      card.appendChild(body);
+      card.appendChild(actions);
+      fragment.appendChild(card);
+    });
+
+    factsListEl.appendChild(fragment);
+  }
+
+  function openFactModal(fact = null) {
+    if (!factModal) return;
+    if (factModalError) {
+      factModalError.classList.add('hidden');
+      factModalError.textContent = '';
+    }
+
+    if (fact) {
+      if (factModalTitle) factModalTitle.textContent = 'Редактировать факт';
+      if (factIdInput) factIdInput.value = fact.id;
+      if (factTextInput) factTextInput.value = fact.fact_text || '';
+      if (factCategorySelect) factCategorySelect.value = fact.category || '';
+      deleteFactRow?.classList.remove('hidden');
+    } else {
+      if (factModalTitle) factModalTitle.textContent = 'Новый факт о себе';
+      if (factIdInput) factIdInput.value = '';
+      if (factTextInput) factTextInput.value = '';
+      if (factCategorySelect) factCategorySelect.value = '';
+      deleteFactRow?.classList.add('hidden');
+    }
+
+    factModal.classList.remove('hidden');
+    setTimeout(() => factTextInput?.focus(), 80);
+  }
+
+  function closeFactModal() {
+    if (!factModal) return;
+    factModal.classList.add('hidden');
+    factForm?.reset();
+  }
+
+  async function deleteFactDirect(fact) {
+    if (!confirm(`Удалить этот факт: «${fact.fact_text}»?`)) return;
+    try {
+      const res = await fetch(`/api/v1/facts/${fact.id}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+      });
+      if (!res.ok) {
+        throw new Error('Не удалось удалить факт');
+      }
+      if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+      await fetchFacts();
+    } catch (err) {
+      alert(err.message || 'Ошибка при удалении факта');
+    }
+  }
+
+  if (addFactBtn) addFactBtn.addEventListener('click', () => openFactModal(null));
+  if (closeFactModalBtn) closeFactModalBtn.addEventListener('click', closeFactModal);
+  if (cancelFactBtn) cancelFactBtn.addEventListener('click', closeFactModal);
+  if (factModal) {
+    factModal.addEventListener('click', (e) => {
+      if (e.target === factModal) closeFactModal();
+    });
+  }
+
+  if (factForm) {
+    factForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = factTextInput?.value?.trim();
+      if (!text) {
+        if (factModalError) {
+          factModalError.textContent = 'Введите текст факта';
+          factModalError.classList.remove('hidden');
+        }
+        return;
+      }
+
+      const factId = factIdInput?.value;
+      const category = factCategorySelect?.value || null;
+      const isEdit = Boolean(factId);
+
+      if (saveFactBtn) {
+        saveFactBtn.disabled = true;
+        saveFactBtn.textContent = 'Сохранение...';
+      }
+      if (factModalError) factModalError.classList.add('hidden');
+
+      try {
+        const url = isEdit ? `/api/v1/facts/${factId}` : '/api/v1/facts/';
+        const method = isEdit ? 'PATCH' : 'POST';
+        const bodyPayload = isEdit ? { fact_text: text, category } : { fact_text: text, category };
+
+        const res = await fetch(url, {
+          method,
+          headers: getHeaders(),
+          body: JSON.stringify(bodyPayload)
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || 'Не удалось сохранить факт');
+        }
+
+        if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+        closeFactModal();
+        await fetchFacts();
+      } catch (err) {
+        if (factModalError) {
+          factModalError.textContent = err.message || 'Ошибка сохранения факта';
+          factModalError.classList.remove('hidden');
+        }
+      } finally {
+        if (saveFactBtn) {
+          saveFactBtn.disabled = false;
+          saveFactBtn.textContent = 'Сохранить';
+        }
+      }
+    });
+  }
+
+  if (deleteFactBtn) {
+    deleteFactBtn.addEventListener('click', async () => {
+      const factId = factIdInput?.value;
+      if (!factId) return;
+      if (!confirm('Вы уверены, что хотите удалить этот факт?')) return;
+
+      try {
+        deleteFactBtn.disabled = true;
+        const res = await fetch(`/api/v1/facts/${factId}`, {
+          method: 'DELETE',
+          headers: getHeaders()
+        });
+        if (!res.ok) throw new Error('Не удалось удалить факт');
+
+        if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+        closeFactModal();
+        await fetchFacts();
+      } catch (err) {
+        if (factModalError) {
+          factModalError.textContent = err.message || 'Ошибка удаления факта';
+          factModalError.classList.remove('hidden');
+        }
+      } finally {
+        deleteFactBtn.disabled = false;
+      }
+    });
+  }
 
   // Settings Modal & Currency Management
   const settingsBtn = document.getElementById('settingsBtn');
@@ -2109,7 +2519,7 @@
   const btnMiniAppDeleteAccount = document.getElementById('btnMiniAppDeleteAccount');
   if (btnMiniAppDeleteAccount) {
     btnMiniAppDeleteAccount.addEventListener('click', async () => {
-      const confirmMsg = 'Вы уверены, что хотите безвозвратно удалить свой аккаунт и ВСЕ финансовые данные?';
+      const confirmMsg = "Вы уверены, что хотите безвозвратно удалить свой аккаунт и ВСЕ финансовые данные?";
       const doDelete = async () => {
         try {
           const initData = getInitData();
@@ -2118,7 +2528,7 @@
             headers: { 'X-Telegram-Init-Data': initData }
           });
           if (res.ok) {
-            alert('Ваш аккаунт и все данные успешно удалены.');
+            alert("Ваш аккаунт и все данные успешно удалены.");
             if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.close) {
               window.Telegram.WebApp.close();
             } else {
@@ -2126,10 +2536,10 @@
             }
           } else {
             const err = await res.json().catch(() => ({}));
-            alert(err.detail || 'Не удалось удалить аккаунт');
+            alert(err.detail || "Не удалось удалить аккаунт");
           }
         } catch (e) {
-          alert('Ошибка сети при удалении аккаунта');
+          alert("Ошибка сети при удалении аккаунта");
         }
       };
 
@@ -2145,23 +2555,36 @@
     });
   }
 
-  // Check URL params for deep linking (e.g. ?page=deposits, ?page=family, ?page=credits, ?page=analytics)
+  // Check URL params for deep linking (e.g. ?page=deposits, ?page=family, ?page=credits, ?page=analytics, ?page=facts)
   const urlParams = new URLSearchParams(window.location.search);
-  const initialPage = (urlParams.get('page') || window.location.hash.replace('#', '') || '').toLowerCase();
+  const tgStartParam = (window.Telegram?.WebApp?.initDataUnsafe?.start_param || '').toLowerCase();
+  const rawTarget = (
+    urlParams.get('page') ||
+    urlParams.get('startapp') ||
+    urlParams.get('tgWebAppStartParam') ||
+    tgStartParam ||
+    window.location.hash.replace('#', '') ||
+    ''
+  ).toLowerCase();
 
-  if (initialPage === 'deposits' || initialPage === 'assets') {
+  if (rawTarget.includes('deposit') || rawTarget.includes('asset')) {
     switchTab('tab-assets');
-  } else if (initialPage === 'credits' || initialPage === 'loans') {
+  } else if (rawTarget.includes('credit') || rawTarget.includes('loan')) {
     switchTab('tab-credits');
-  } else if (initialPage === 'family' || initialPage === 'fam') {
+  } else if (rawTarget.includes('fam')) {
     switchTab('tab-operations');
     switchOpsMode('family');
-  } else if (initialPage === 'analytics' || initialPage === 'stats') {
+  } else if (rawTarget.includes('analytic') || rawTarget.includes('stat')) {
     switchTab('tab-analytics');
+  } else if (rawTarget.includes('fact') || rawTarget.includes('personal') || rawTarget.includes('profile')) {
+    switchTab('tab-facts');
   } else {
     switchTab('tab-operations');
   }
 
-  // Always load user profile
+  // Hydrate immediately from instant LocalStorage cache (0 ms)
+  hydrateFromLocalStorage();
+
+  // Always load live user profile
   fetchProfile();
 })();

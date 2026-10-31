@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Numeric, String, Text, BigInteger, ForeignKey, DateTime
+from sqlalchemy import Numeric, String, Text, BigInteger, ForeignKey, DateTime, Index, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -31,6 +31,10 @@ class TransactionSource(str, Enum):
 
 class Transaction(Base, TimestampMixin):
     __tablename__ = "transactions"
+    __table_args__ = (
+        Index("ix_transactions_user_id_tx_date", "user_id", text("transaction_date DESC")),
+        Index("ix_transactions_family_group_id_tx_date", "family_group_id", text("transaction_date DESC"), postgresql_where=text("family_group_id IS NOT NULL")),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))

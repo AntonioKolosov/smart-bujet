@@ -11,12 +11,10 @@ from src.core.config import settings
 router = Router()
 
 def get_miniapp_family_url() -> str:
-    domain = settings.domain
-    if not domain or domain == "localhost":
-        domain = "85.198.89.188.sslip.io:8443"
-    elif ":" not in domain and "sslip.io" in domain:
-        domain = f"{domain}:8443"
-    return f"https://{domain}/app?page=family"
+    from src.bot.keyboards.inline import get_miniapp_url
+    base = get_miniapp_url()
+    sep = "&" if "?" in base else "?"
+    return f"{base}{sep}page=family"
 
 @router.message(Command("family"))
 async def cmd_family(message: Message, session: AsyncSession):

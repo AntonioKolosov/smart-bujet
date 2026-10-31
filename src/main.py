@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from starlette.middleware.gzip import GZipMiddleware
+from starlette.responses import Response
 from aiogram.types import MenuButtonWebApp, WebAppInfo, BotCommand
 from sqlalchemy import text
 from src.core.config import settings
@@ -20,13 +22,26 @@ from src.core.report_scheduler import report_scheduler_background_loop
 
 logger = logging.getLogger(__name__)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure database schema is up-to-date with non-breaking migrations
+    # Ensure database schema is up-to-date with non-breaking migrations & composite indexes
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if conn.dialect.name == "postgresql":
             await conn.execute(text("ALTER TYPE transactionsource ADD VALUE IF NOT EXISTS 'statement';"))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_transactions_user_id_tx_date "
+                "ON transactions (user_id, transaction_date DESC);"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_transactions_family_group_id_tx_date "
+                "ON transactions (family_group_id, transaction_date DESC) "
+                "WHERE family_group_id IS NOT NULL;"
+            ))
+        await conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS has_accepted_terms BOOLEAN DEFAULT FALSE;"
+        ))
         await conn.execute(text(
             "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS related_transaction_id UUID REFERENCES transactions(id) ON DELETE SET NULL;"
         ))
@@ -56,12 +71,8 @@ async def lifespan(app: FastAPI):
     # Configure Telegram Menu Button and Bot Commands for instant MiniApp access
     if is_real_token:
         try:
-            domain = settings.domain
-            if not domain or domain == "localhost":
-                domain = "85.198.89.188.sslip.io:8443"
-            elif ":" not in domain and "sslip.io" in domain:
-                domain = f"{domain}:8443"
-            miniapp_url = f"https://{domain}/app"
+            from src.bot.keyboards.inline import get_miniapp_url
+            miniapp_url = get_miniapp_url()
 
             me = await bot.get_me()
             if me and me.username:
@@ -79,6 +90,7 @@ async def lifespan(app: FastAPI):
                 BotCommand(command="deposits", description="Депозиты и сбережения"),
                 BotCommand(command="credits", description="Кредиты и займы"),
                 BotCommand(command="analytics", description="Аналитика и графики"),
+                BotCommand(command="facts", description="🧠 Персонализация и память агента"),
                 BotCommand(command="family", description="Семейный бюджет"),
                 BotCommand(command="start", description="Перезапустить бота"),
             ])
@@ -116,14 +128,24 @@ async def lifespan(app: FastAPI):
         await bot.delete_webhook()
     await engine.dispose()
 
+
+class CachedStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 app = FastAPI(title="Smart Bujet API", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.include_router(api_router, prefix="/api/v1")
 
 # Mount MiniApp static assets
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    app.mount("/static", CachedStaticFiles(directory=static_dir), name="static")
 
     @app.get("/app", include_in_schema=False)
     @app.get("/", include_in_schema=False)

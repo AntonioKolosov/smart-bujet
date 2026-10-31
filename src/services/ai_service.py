@@ -432,7 +432,8 @@ class AIService:
     async def generate_financial_advice(
         self,
         summary: Any,
-        user_id: int | None = None
+        user_id: int | None = None,
+        user_facts: list[str] | None = None
     ) -> dict[str, str]:
         """
         Generates compact, high-precision financial recommendations using Gemini 3.8 Flash.
@@ -470,11 +471,17 @@ class AIService:
             "is_family": getattr(summary, "is_family", False)
         }
 
+        facts_block = ""
+        if user_facts:
+            masked_facts = [PIIGuardrailService.mask_text(f) for f in user_facts]
+            facts_block = "\nПЕРСОНАЛЬНЫЙ КОНТЕКСТ И ФАКТЫ О ПОЛЬЗОВАТЕЛЕ (цели, привычки, расписание):\n" + "\n".join(f"- {f}" for f in masked_facts) + "\nУчитывай эти цели и привычки в рекомендациях.\n"
+
         prompt = (
             "Ты — персональный финансовый консультант Smart Bujet.\n"
             "На основе готовых рассчитанных показателей пользователя сформируй строго 3 персональные рекомендации.\n"
             "Не пересчитывай цифры, они проверены в SQL. Не используй общие фразы — дай конкретные советы с цифрами.\n\n"
-            f"ФИНАНСОВЫЙ СРЕЗ:\n{json.dumps(payload, ensure_ascii=False)}\n\n"
+            f"ФИНАНСОВЫЙ СРЕЗ:\n{json.dumps(payload, ensure_ascii=False)}\n"
+            f"{facts_block}\n"
             "ФОРМАТ ОТВЕТА (СТРОГО JSON):\n"
             "{\n"
             '  "where_to_cut": "1-2 емких предложения: где именно сократить расходы исходя из топ-категорий",\n'
@@ -564,6 +571,67 @@ class AIService:
                 f"Необходимо пересмотреть траты для возврата в профицит."
             )
         return f"Отличный темп: норма сбережений {rate}%. Подушка безопасности закрывает {runway:.1f} мес."
+
+    @staticmethod
+    def _classify_fact_rule_based(text: str) -> dict[str, str]:
+        lower = text.lower()
+        if any(w in lower for w in ("цель", "накопить", "купить", "собрать", "планирую", "отпуск")):
+            cat = "goal"
+        elif any(w in lower for w in ("каждый", "каждое", "всегда", "обычно", "привычка", "утро", "вечер", "кофе")):
+            cat = "habit"
+        elif any(w in lower for w in ("числа", "зарплата", "график", "расписание", "понедельник", "пятниц")):
+            cat = "schedule"
+        elif any(w in lower for w in ("нельзя", "лимит", "запрет", "не тратить", "ограничение", "не больше")):
+            cat = "constraint"
+        else:
+            cat = "other"
+        return {"category": cat}
+
+    async def classify_user_fact(self, text: str, user_id: int | None = None) -> dict[str, str]:
+        """
+        Classifies user memory fact into one of: 'goal', 'habit', 'schedule', 'constraint', 'other'.
+        Uses Gemini with strict JSON output or keyword heuristics fallback.
+        """
+        rule_res = self._classify_fact_rule_based(text)
+        cat = rule_res["category"]
+
+        if user_id is not None:
+            allowed, _ = ai_rate_limiter.check_and_record(user_id)
+            if not allowed:
+                return {"category": cat}
+
+        if not self.client:
+            return {"category": cat}
+
+        masked_text = PIIGuardrailService.mask_text(text)
+        prompt = (
+            "Определи категорию персонального факта пользователя для финансового ассистента.\n"
+            "Доступные категории:\n"
+            "- 'goal' (финансовая или жизненная цель: накопить, купить, закрыть долг)\n"
+            "- 'habit' (регулярная привычка, образ жизни: пью кофе каждое утро, хожу в зал)\n"
+            "- 'schedule' (расписание поступлений или списаний: зарплата 5-го числа, аренда 1-го)\n"
+            "- 'constraint' (бюджетное правило, ограничение: не тратить больше 50к на кафе)\n"
+            "- 'other' (общая заметка)\n\n"
+            f"Текст: \"{masked_text}\"\n\n"
+            "Верни СТРОГО JSON: {\"category\": \"goal|habit|schedule|constraint|other\"}"
+        )
+        try:
+            res = await self.client.aio.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1
+                )
+            )
+            data = json.loads(res.text.strip())
+            parsed_cat = data.get("category")
+            if parsed_cat in {"goal", "habit", "schedule", "constraint", "other"}:
+                return {"category": parsed_cat}
+        except Exception as exc:
+            logger.warning("Fact classification failed: %s", exc)
+
+        return {"category": cat}
 
 
 class AIRateLimiter:
