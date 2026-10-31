@@ -66,7 +66,7 @@ class TestPersonalizationAndArgonSecurity(unittest.IsolatedAsyncioTestCase):
         self.assertIn("минутный лимит", msg)
 
     def test_webhook_deduplication(self):
-        update_id = 1234567
+        update_id = 987654321
         # First arrival is not duplicate
         self.assertFalse(is_duplicate_update(update_id))
         # Immediate duplicate arrival is detected
