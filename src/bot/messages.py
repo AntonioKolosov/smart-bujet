@@ -346,10 +346,38 @@ def format_summary_card(
     credits = getattr(summary, "total_credit_debt", 0.0)
     runway = getattr(summary, "runway_months", 0.0)
 
+    base_curr = (curr or "KZT").upper()
+    raw_deps = getattr(summary, "deposits_by_currency", None)
+    dep_map: dict[str, float] = {}
+    if isinstance(raw_deps, dict):
+        for k, v in raw_deps.items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and round(float(v), 2) > 0:
+                code = str(k).strip().upper()
+                if code:
+                    dep_map[code] = round(dep_map.get(code, 0.0) + float(v), 2)
+
+    has_foreign_deposit = any(code != base_curr for code in dep_map)
+    if has_foreign_deposit:
+        order_ref = ("USD", "EUR", "RUB", "KZT")
+        ordered_codes = sorted(
+            dep_map.keys(),
+            key=lambda c: (
+                0 if c == base_curr else 1,
+                order_ref.index(c) if c in order_ref else 99,
+                c,
+            ),
+        )
+        parts = [format_amount(dep_map[c], c) for c in ordered_codes]
+        equiv_str = f" (≈ {format_amount(deposits, curr)})" if float(deposits or 0.0) > 0 else ""
+        deposit_line = f"• 🏦 Депозиты и сбережения: <b>{' • '.join(parts)}</b>{equiv_str}"
+    else:
+        base_dep_amt = dep_map.get(base_curr, deposits)
+        deposit_line = f"• 🏦 Депозиты и сбережения: <b>{format_amount(base_dep_amt, curr)}</b>"
+
     lines.extend([
         "💼 <b>Активы и обязательства:</b>",
         f"• 💳 На карте / текущий баланс: <b>{format_amount(liquid, curr)}</b>",
-        f"• 🏦 Депозиты и сбережения: <b>{format_amount(deposits, curr)}</b>",
+        deposit_line,
         f"• 💳 Остаток долга по кредитам: <b>{format_amount(credits, curr)}</b>",
         f"• 🛡️ Подушка безопасности: <b>{runway:.1f} мес.</b>",
     ])

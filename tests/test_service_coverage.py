@@ -617,7 +617,11 @@ class TestReportServiceCoverage(unittest.IsolatedAsyncioTestCase):
         l_mock.tout = 50000.0
         l_mock.tin = 0.0
 
-        deposit_val = 500000.0
+        dep_row = MagicMock()
+        dep_row.currency = "KZT"
+        dep_row.total = 500000.0
+        dep_mock = MagicMock()
+        dep_mock.all.return_value = [dep_row]
 
         cr_mock = MagicMock()
         cr_mock.debt = 100000.0
@@ -627,10 +631,10 @@ class TestReportServiceCoverage(unittest.IsolatedAsyncioTestCase):
             MagicMock(one=MagicMock(return_value=cf_mock)),
             cat_mock,
             MagicMock(one=MagicMock(return_value=l_mock)),
+            dep_mock,
             MagicMock(one=MagicMock(return_value=cr_mock)),
         ]
         self.session.execute = AsyncMock(side_effect=execute_results)
-        self.session.scalar = AsyncMock(return_value=deposit_val)
 
         analytics = await self.service.get_agent_analytics(self.user_id, period="month")
 
@@ -651,9 +655,9 @@ class TestReportServiceCoverage(unittest.IsolatedAsyncioTestCase):
             MagicMock(one=MagicMock(return_value=cf_mock)),
             cat_mock,
             MagicMock(one=MagicMock(return_value=l_mock)),
+            MagicMock(all=MagicMock(return_value=[])),
             MagicMock(one=MagicMock(return_value=cr_mock)),
         ])
-        self.session.scalar = AsyncMock(return_value=0.0)
 
         analytics = await self.service.get_agent_analytics(self.user_id, period="month")
         self.assertEqual(analytics.runway_months, 99.0)
