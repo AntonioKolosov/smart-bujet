@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
+
 def currency_keyboard() -> InlineKeyboardMarkup:
     currencies = ["KZT", "RUB", "USD", "EUR"]
     buttons = [
@@ -11,14 +12,16 @@ def currency_keyboard() -> InlineKeyboardMarkup:
     keyboard = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+
 def get_miniapp_url() -> str:
     from src.core.config import settings
     domain = (getattr(settings, "miniapp_domain", None) or settings.domain or "").strip()
     if not domain or domain == "localhost":
-        domain = "dev.85.198.89.188.sslip.io:8443"
+        domain = "85.198.89.188.sslip.io:8443"
     elif ":" not in domain and "sslip.io" in domain:
         domain = f"{domain}:8443"
-    return f"https://{domain}/app?v=2.18"
+    return f"https://{domain}/app"
+
 
 def welcome_back_keyboard(miniapp_url: str | None = None) -> InlineKeyboardMarkup:
     if miniapp_url is None:
@@ -44,22 +47,6 @@ def welcome_back_keyboard(miniapp_url: str | None = None) -> InlineKeyboardMarku
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def onboarding_choice_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🚀 Начать с нуля", callback_data="onboard:fresh"),
-                InlineKeyboardButton(text="📄 Загрузить историю", callback_data="onboard:statement"),
-            ]
-        ]
-    )
-
-def statement_upload_keyboard(collected_count: int = 0) -> InlineKeyboardMarkup:
-    rows = []
-    if collected_count > 0:
-        rows.append([InlineKeyboardButton(text=f"✅ Готово, обработать ({collected_count} файлов)", callback_data="statement:process")])
-    rows.append([InlineKeyboardButton(text="🚀 Начать с нуля", callback_data="onboard:fresh")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def analytics_keyboard(analytics_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -68,12 +55,14 @@ def analytics_keyboard(analytics_url: str) -> InlineKeyboardMarkup:
         ]
     )
 
+
 def miniapp_keyboard(miniapp_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📱 Открыть журнал транзакций", web_app=WebAppInfo(url=miniapp_url))]
         ]
     )
+
 
 def deposits_keyboard(deposits_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -82,6 +71,7 @@ def deposits_keyboard(deposits_url: str) -> InlineKeyboardMarkup:
         ]
     )
 
+
 def credits_keyboard(credits_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -89,12 +79,14 @@ def credits_keyboard(credits_url: str) -> InlineKeyboardMarkup:
         ]
     )
 
+
 def family_keyboard(family_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="👨‍👩‍👧‍👦 Открыть Семейный бюджет", web_app=WebAppInfo(url=family_url))]
         ]
     )
+
 
 def confirm_transaction_keyboard(tx_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -105,6 +97,7 @@ def confirm_transaction_keyboard(tx_id: int) -> InlineKeyboardMarkup:
             ]
         ]
     )
+
 
 def tx_toggle_keyboard(transactions: Any) -> InlineKeyboardMarkup:
     """Generate dynamic confirmation keyboard:

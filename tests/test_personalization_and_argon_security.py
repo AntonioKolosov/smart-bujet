@@ -11,6 +11,8 @@ from src.models.user import User
 from src.services.ai_service import AIService, AIRateLimiter
 from src.services.transaction_service import TransactionService
 from src.api.v1.webhook import is_duplicate_update
+from src.bot.handlers.start import cmd_start, on_privacy_accept, PRIVACY_AGREEMENT_TEXT
+from src.bot.keyboards.inline import get_miniapp_url
 
 
 class TestPersonalizationAndArgonSecurity(unittest.IsolatedAsyncioTestCase):
@@ -133,6 +135,86 @@ class TestPersonalizationAndArgonSecurity(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(txs), 1)
         self.assertIsNone(txs[0].raw_text)
+
+    async def test_cmd_start_new_user_shows_user_agreement(self):
+        """
+        Verify /start onboarding shows mandatory User Agreement (PRIVACY_AGREEMENT_TEXT)
+        and privacy:accept button for a brand-new user, with username=None.
+        """
+        msg = AsyncMock()
+        msg.from_user = MagicMock(id=777001, first_name="Алия", username="aliya_handle")
+        cmd = MagicMock(args=None)
+
+        added_users = []
+        self.session.scalar = AsyncMock(return_value=None)
+        self.session.add = MagicMock(side_effect=lambda u: added_users.append(u))
+        self.session.commit = AsyncMock()
+
+        await cmd_start(msg, self.session, cmd)
+
+        self.assertEqual(len(added_users), 1)
+        self.assertIsNone(added_users[0].username)
+        self.assertFalse(added_users[0].has_accepted_terms)
+        msg.answer.assert_awaited_once()
+        sent_text = msg.answer.call_args[0][0]
+        sent_kb = msg.answer.call_args[1]["reply_markup"]
+        self.assertIn("Пользовательское соглашение", sent_text)
+        self.assertEqual(sent_text, PRIVACY_AGREEMENT_TEXT)
+        self.assertEqual(sent_kb.inline_keyboard[0][0].callback_data, "privacy:accept")
+
+    async def test_cmd_start_family_invite_new_user_shows_user_agreement(self):
+        """
+        Verify /start fam_<code> also enforces the mandatory User Agreement gate for new users.
+        """
+        msg = AsyncMock()
+        msg.from_user = MagicMock(id=777002, first_name="Тимур", username="timur_handle")
+        cmd = MagicMock(args="fam_abc123")
+
+        self.session.scalar = AsyncMock(return_value=None)
+        self.session.add = MagicMock()
+        self.session.commit = AsyncMock()
+
+        with patch("src.bot.handlers.start.FamilyService") as mock_fam_cls:
+            mock_fam = mock_fam_cls.return_value
+            mock_fam.join_by_invite = AsyncMock(return_value=(MagicMock(name="Семья"), None, "Вы вступили в группу!"))
+            await cmd_start(msg, self.session, cmd)
+
+        msg.answer.assert_awaited_once()
+        sent_text = msg.answer.call_args[0][0]
+        sent_kb = msg.answer.call_args[1]["reply_markup"]
+        self.assertIn("Пользовательское соглашение", sent_text)
+        self.assertEqual(sent_kb.inline_keyboard[0][0].callback_data, "privacy:accept")
+
+    async def test_privacy_accept_transitions_to_currency_and_prod_miniapp_url(self):
+        """
+        Verify clicking privacy:accept sets has_accepted_terms=True and proceeds directly
+        to currency selection (with zero bank statement prompt), and get_miniapp_url()
+        defaults safely to production domain when MINIAPP_DOMAIN is unset.
+        """
+        pending_user = User(
+            id=777001,
+            first_name="Алия",
+            currency="KZT",
+            initial_balance=None,
+            has_accepted_terms=False,
+        )
+        cb = AsyncMock()
+        cb.from_user = MagicMock(id=777001)
+        self.session.scalar = AsyncMock(return_value=pending_user)
+        self.session.commit = AsyncMock()
+
+        await on_privacy_accept(cb, self.session)
+
+        self.assertTrue(pending_user.has_accepted_terms)
+        cb.message.edit_text.assert_awaited_once()
+        kb = cb.message.edit_text.call_args[1]["reply_markup"]
+        callbacks = [btn.callback_data for row in kb.inline_keyboard for btn in row]
+        self.assertIn("currency_KZT", callbacks)
+        self.assertNotIn("onboard:statement", callbacks)
+
+        from src.core.config import settings
+        with patch.object(settings, "miniapp_domain", None), patch.object(settings, "domain", "localhost"):
+            self.assertEqual(get_miniapp_url(), "https://85.198.89.188.sslip.io:8443/app")
 
 
 if __name__ == "__main__":

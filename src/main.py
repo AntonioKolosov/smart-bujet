@@ -22,13 +22,26 @@ from src.core.report_scheduler import report_scheduler_background_loop
 
 logger = logging.getLogger(__name__)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure database schema is up-to-date with non-breaking migrations
+    # Ensure database schema is up-to-date with non-breaking migrations & composite indexes
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if conn.dialect.name == "postgresql":
             await conn.execute(text("ALTER TYPE transactionsource ADD VALUE IF NOT EXISTS 'statement';"))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_transactions_user_id_tx_date "
+                "ON transactions (user_id, transaction_date DESC);"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_transactions_family_group_id_tx_date "
+                "ON transactions (family_group_id, transaction_date DESC) "
+                "WHERE family_group_id IS NOT NULL;"
+            ))
+        await conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS has_accepted_terms BOOLEAN DEFAULT FALSE;"
+        ))
         await conn.execute(text(
             "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS related_transaction_id UUID REFERENCES transactions(id) ON DELETE SET NULL;"
         ))
@@ -115,12 +128,14 @@ async def lifespan(app: FastAPI):
         await bot.delete_webhook()
     await engine.dispose()
 
+
 class CachedStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope) -> Response:
         response = await super().get_response(path, scope)
         if response.status_code == 200:
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
+
 
 app = FastAPI(title="Smart Bujet API", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1000)

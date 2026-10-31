@@ -12,8 +12,7 @@ dependencies = [
     "alembic",
     "pydantic-settings",
     "google-genai",
-    "httpx",
-    "pypdf>=4.0.0"
+    "httpx"
 ]
 
 [project.optional-dependencies]
@@ -52,4 +51,3 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
-
