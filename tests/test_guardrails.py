@@ -120,5 +120,32 @@ class TestGuardrailsBotMessages(unittest.TestCase):
         self.assertIn("чек", photo_warning.lower())
 
 
+class TestVoiceParseAndUnmaskText(unittest.IsolatedAsyncioTestCase):
+    async def test_parse_voice_unmasks_transcript_and_items(self):
+        from src.services.ai_service import AIService
+        from src.services.pii_guardrail_service import PIIGuardrailService
+
+        ai = AIService(api_key="test-key")
+        fake_client = MagicMock()
+        fake_response = MagicMock()
+        fake_response.text = ('{"is_financial": true, "transcript": "Пополнил [СЧЕТ_1] на 50000", ''"items": [{"category": "Депозит и вклады", "type": "transfer_out", "amount": 50000, ''"item_name": "Пополнение [СЧЕТ_1]", "asset_account_id": "[СЧЕТ_1]", "target_asset_name": "[СЧЕТ_1]"}]}'
+        )
+        fake_client.aio.models.generate_content = AsyncMock(return_value=fake_response)
+        ai.client = fake_client
+
+        res = await ai.parse_voice(
+            audio_bytes=b"OggS-dummy",
+            mime_type="audio/ogg",
+            categories=["Депозит и вклады", "Продукты"],
+            assets_context=[{"id": "uuid-111", "name": "Kaspi Депозит", "type": "deposit", "currency": "KZT"}],
+        )
+        self.assertTrue(res["is_financial"])
+        self.assertEqual(res["transcript"], "Пополнил Kaspi Депозит на 50000")
+        self.assertEqual(len(res["items"]), 1)
+        self.assertEqual(res["items"][0]["asset_account_id"], "uuid-111")
+        self.assertEqual(res["items"][0]["target_asset_name"], "Kaspi Депозит")
+        self.assertEqual(res["items"][0]["item_name"], "Пополнение Kaspi Депозит")
+
+
 if __name__ == "__main__":
     unittest.main()

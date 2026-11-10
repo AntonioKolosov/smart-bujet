@@ -765,6 +765,8 @@ class TransactionService:
             user_id, voice_text, raw_items, active_credits=user_credits
         )
         if not raw_items:
+            if root_transcript:
+                raise InvalidTransactionAmountError("Amount must be greater than 0", raw_text=root_transcript)
             raise TransactionParseError("Could not parse voice transaction")
 
         raw_items = DiscountDistributor.distribute(
