@@ -1052,7 +1052,15 @@ input[type="number"] {
   background: rgba(255, 255, 255, 0.18);
 }
 
+.currency-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+}
+
 .currency-pill-btn {
+  grid-column: span 2;
+  white-space: nowrap;
   background: var(--secondary-bg-color, #1e293b);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
@@ -1063,6 +1071,11 @@ input[type="number"] {
   cursor: pointer;
   text-align: center;
   transition: all 0.2s ease;
+}
+
+.currency-grid .currency-pill-btn:nth-child(4),
+.currency-grid .currency-pill-btn:nth-child(5) {
+  grid-column: span 3;
 }
 
 .currency-pill-btn:hover,
@@ -1835,6 +1848,17 @@ body.theme-light .settings-btn {
 }
 body.theme-light .settings-btn:active {
   background: #e2e8f0;
+}
+body.theme-light .currency-pill-btn {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+body.theme-light .currency-pill-btn:hover,
+body.theme-light .currency-pill-btn.active {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff;
 }
 
 /* Legend items in light mode */

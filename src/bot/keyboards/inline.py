@@ -5,7 +5,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 
 def currency_keyboard() -> InlineKeyboardMarkup:
-    currencies = ["KZT", "RUB", "USD", "EUR"]
+    currencies = ["KZT", "RUB", "USD", "EUR", "ILS"]
     buttons = [
         InlineKeyboardButton(text=c, callback_data=f"currency_{c}") for c in currencies
     ]

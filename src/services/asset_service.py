@@ -211,7 +211,7 @@ class AssetService:
         account.balance = float(Decimal(str(account.balance)) + val_amount)
 
         if is_foreign:
-            approx_rates = {"USD": 450.0, "EUR": 490.0, "RUB": 5.0}
+            approx_rates = {"USD": 450.0, "EUR": 490.0, "RUB": 5.0, "ILS": 135.0}
             rate = Decimal(str(exchange_rate or approx_rates.get(acc_currency, 450.0)))
             base_amount = float(val_amount * rate)
             asset_amt = float(val_amount)
@@ -270,7 +270,7 @@ class AssetService:
         account.balance = float(Decimal(str(account.balance)) - val_amount)
 
         if is_foreign:
-            approx_rates = {"USD": 450.0, "EUR": 490.0, "RUB": 5.0}
+            approx_rates = {"USD": 450.0, "EUR": 490.0, "RUB": 5.0, "ILS": 135.0}
             rate = Decimal(str(exchange_rate or approx_rates.get(acc_currency, 450.0)))
             base_amount = float(val_amount * rate)
             asset_amt = float(val_amount)
@@ -313,7 +313,7 @@ class AssetService:
         user = await self.session.get(User, user_id)
         base_currency = user.currency if user else "KZT"
 
-        approx_rates_to_kzt = {"KZT": 1.0, "USD": 500.0, "EUR": 540.0, "RUB": 5.3}
+        approx_rates_to_kzt = {"KZT": 1.0, "USD": 500.0, "EUR": 540.0, "RUB": 5.3, "ILS": 135.0}
         base_rate_to_kzt = approx_rates_to_kzt.get(base_currency, 1.0)
 
         total_deposits_base = Decimal("0")
@@ -519,7 +519,7 @@ class AssetService:
         if bal > Decimal("0"):
             is_foreign = (acc_currency != base_currency)
             if is_foreign:
-                approx_rates = {"USD": 450.0, "EUR": 490.0, "RUB": 5.0}
+                approx_rates = {"USD": 450.0, "EUR": 490.0, "RUB": 5.0, "ILS": 135.0}
                 rate = Decimal(str(liquidation_rate or approx_rates.get(acc_currency, 450.0)))
                 liquid_amount = bal * rate
                 asset_amt = float(bal)
