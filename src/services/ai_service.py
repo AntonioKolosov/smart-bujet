@@ -351,7 +351,7 @@ class AIService:
         masked_assets = PIIGuardrailService.mask_assets_context(assets_context, session)
         masked_credits = PIIGuardrailService.mask_credits_context(credits_context, session)
 
-        audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
+        audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type) if types is not None else audio_bytes
         assets_block = self._format_assets_context(masked_assets)
         credits_block = self._format_credits_context(masked_credits)
         prompt = (
@@ -411,7 +411,7 @@ class AIService:
         if not client:
             return {"is_financial": True, "items": []}
 
-        media_part = types.Part.from_bytes(data=media_bytes, mime_type=mime_type)
+        media_part = types.Part.from_bytes(data=media_bytes, mime_type=mime_type) if types is not None else media_bytes
         prompt = (
             f"Ты анализатор кассовых чеков и квитанций Smart Bujet.\n"
             f"1. GUARDRAILS: Если на фото/PDF НЕ кассовый чек и не платёжная квитанция — верни СТРОГО {{\"is_financial\": false, \"items\": []}}.\n"

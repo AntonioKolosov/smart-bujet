@@ -173,8 +173,25 @@ class PIIGuardrailService:
         return masked
 
     @classmethod
+    def unmask_text(cls, text: str, session: MaskingSession | None = None) -> str:
+        """Restores masked PII and asset/credit name tokens in a plain string."""
+        if not text or not isinstance(text, str) or session is None:
+            return text
+        unmasked = text
+        for tok, orig in session.token_to_pii.items():
+            unmasked = unmasked.replace(tok, orig)
+        for tok, orig in session.token_to_name.items():
+            unmasked = unmasked.replace(tok, orig)
+        return unmasked
+
+    @classmethod
     def unmask_payload(cls, payload: dict[str, Any], session: MaskingSession) -> dict[str, Any]:
         """Restores real UUIDs, asset/credit names, and unmasks PII tokens in payload."""
+        for root_field in ("transcript", "venue_name"):
+            root_val = payload.get(root_field)
+            if root_val and isinstance(root_val, str):
+                payload[root_field] = cls.unmask_text(root_val, session)
+
         items = payload.get("items", [])
         for it in items:
             # Asset unmask
@@ -207,10 +224,6 @@ class PIIGuardrailService:
             for field_name in ("item_name", "raw_text"):
                 val = it.get(field_name)
                 if val and isinstance(val, str):
-                    for tok, orig in session.token_to_pii.items():
-                        val = val.replace(tok, orig)
-                    for tok, orig in session.token_to_name.items():
-                        val = val.replace(tok, orig)
-                    it[field_name] = val
+                    it[field_name] = cls.unmask_text(val, session)
 
         return payload
