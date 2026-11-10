@@ -8,6 +8,7 @@ CURRENCY_SYMBOLS: dict[str, str] = {
     "RUB": "₽",
     "USD": "$",
     "EUR": "€",
+    "ILS": "₪",
 }
 
 
@@ -358,7 +359,7 @@ def format_summary_card(
 
     has_foreign_deposit = any(code != base_curr for code in dep_map)
     if has_foreign_deposit:
-        order_ref = ("USD", "EUR", "RUB", "KZT")
+        order_ref = ("USD", "EUR", "RUB", "ILS", "KZT")
         ordered_codes = sorted(
             dep_map.keys(),
             key=lambda c: (

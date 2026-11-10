@@ -17,9 +17,10 @@ APPROX_RATES_TO_KZT: dict[str, float] = {
     "USD": 500.0,
     "EUR": 540.0,
     "RUB": 5.3,
+    "ILS": 135.0,
 }
 
-CANONICAL_CURRENCY_ORDER: tuple[str, ...] = ("USD", "EUR", "RUB", "KZT")
+CANONICAL_CURRENCY_ORDER: tuple[str, ...] = ("USD", "EUR", "RUB", "ILS", "KZT")
 
 
 CATEGORY_UI_META: dict[str, dict[str, str]] = {

@@ -65,7 +65,8 @@
     KZT: '₸',
     RUB: '₽',
     USD: '$',
-    EUR: '€'
+    EUR: '€',
+    ILS: '₪'
   };
 
   const SOURCE_LABELS = {

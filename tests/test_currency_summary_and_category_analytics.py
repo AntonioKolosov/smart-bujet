@@ -244,8 +244,12 @@ class TestSingleCategoryMonthlyAnalytics(unittest.IsolatedAsyncioTestCase):
         with open(os.path.join(base_dir, "styles.css"), "r", encoding="utf-8") as f:
             css = f.read()
 
-        self.assertIn("styles.css?v=2.27", html)
-        self.assertIn("app.js?v=2.27", html)
+        self.assertIn("styles.css?v=2.28", html)
+        self.assertIn("app.js?v=2.28", html)
+        self.assertEqual(html.count('<option value="ILS">₪ ILS</option>'), 3)
+        self.assertIn('data-currency="ILS">₪ ILS</button>', html)
+        self.assertIn("ILS: '₪'", js)
+        self.assertIn(".currency-grid", css)
         topbar_chunk = html.split('<header class="app-topbar">')[1].split("</header>")[0]
         self.assertNotIn('id="settingsBtn"', topbar_chunk)
         balance_card_chunk = html.split('<div id="opsPersonalView">')[1].split('<div class="header-summary">')[0]

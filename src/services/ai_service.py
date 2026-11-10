@@ -31,7 +31,7 @@ _MAX_ADVICE_CACHE_ENTRIES = 256
 
 _CREDIT_TRIGGER_RE = re.compile(r"(?:кредит|рассрочк|платеж|займ|заем|долг|каспи|халык)", re.IGNORECASE)
 _ASSET_TRIGGER_RE = re.compile(
-    r"(?:депозит|вклад|копилк|счет|счёт|валют|доллар|\$|usd|евро|€|eur|курс|снял|вывел|пополн)",
+    r"(?:депозит|вклад|копилк|счет|счёт|валют|доллар|\$|usd|евро|€|eur|шекел|шек|₪|ils|курс|снял|вывел|пополн)",
     re.IGNORECASE,
 )
 
@@ -293,7 +293,7 @@ class AIService:
 
         item_schema = (
             '{"category": "из списка", "type": "expense|income|transfer_out|transfer_in", "amount": число, "item_name": "Название"'
-            + (', "target_currency": "USD/EUR/null", "asset_amount": число_или_null, "exchange_rate": число_или_null, "asset_account_id": "UUID_или_null", "target_asset_name": "название_или_null"' if include_assets else "")
+            + (', "target_currency": "USD/EUR/RUB/ILS/null", "asset_amount": число_или_null, "exchange_rate": число_или_null, "asset_account_id": "UUID_или_null", "target_asset_name": "название_или_null"' if include_assets else "")
             + (', "credit_action": "take|repay|null", "credit_account_id": "UUID_или_null", "target_credit_name": "название_или_null"' if include_credits else "")
             + "}"
         )

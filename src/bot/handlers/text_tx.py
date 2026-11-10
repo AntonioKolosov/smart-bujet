@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def try_parse_pure_amount(text: str) -> float | None:
     t = text.strip().lower()
-    m = re.search(r"\b([0-9]+(?:[\s.,][0-9]{3})*(?:[.,][0-9]{1,2})?)\s*(тыс(?:\.|яч)?|k|к|тенге|руб|тг|kzt)?\b", t)
+    m = re.search(r"\b([0-9]+(?:[\s.,][0-9]{3})*(?:[.,][0-9]{1,2})?)\s*(тыс(?:\.|яч)?|k|к|тенге|руб|тг|шек(?:ел(?:ей|я|ь))?|₪|kzt|ils)?\b", t)
     if m:
         num_str = m.group(1).replace(" ", "").replace(",", ".")
         multiplier = 1000 if m.group(2) in ("тыс", "тысяч", "k", "к") else 1
@@ -22,7 +22,7 @@ def try_parse_pure_amount(text: str) -> float | None:
             val = float(num_str) * multiplier
             ignored_words = {
                 "у", "меня", "сейчас", "на", "счету", "счете", "баланс", "мой",
-                "тыс", "тысяч", "k", "к", "тенге", "тг", "руб", "рублей", "kzt", "rub", "usd", "eur"
+                "тыс", "тысяч", "k", "к", "тенге", "тг", "руб", "рублей", "шек", "шекель", "шекеля", "шекелей", "kzt", "rub", "usd", "eur", "ils"
             }
             words = [w for w in re.findall(r"[а-яa-z]+", t) if w not in ignored_words]
             if len(words) <= 1:

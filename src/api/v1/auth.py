@@ -72,10 +72,10 @@ async def update_my_currency(
     session: AsyncSession = Depends(get_db)
 ):
     cur = data.currency.upper().strip()
-    if cur not in {"KZT", "RUB", "USD", "EUR"}:
+    if cur not in {"KZT", "RUB", "USD", "EUR", "ILS"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Поддерживаемые валюты: KZT, RUB, USD, EUR"
+            detail="Поддерживаемые валюты: KZT, RUB, USD, EUR, ILS"
         )
     current_user.currency = cur
     await session.commit()

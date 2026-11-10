@@ -1,7 +1,7 @@
 import re
 from decimal import Decimal, InvalidOperation
 
-CURRENCY_SUFFIXES = r"(?:руб(?:лей|ля|\.)?|р\b|тг\b|тенге|₸|kzt\b|rub\b|usd\b|\$|€)"
+CURRENCY_SUFFIXES = r"(?:руб(?:лей|ля|\.)?|р\b|тг\b|тенге|₸|шек(?:ел(?:ей|я|ь|\.)?)?|₪|kzt\b|rub\b|usd\b|eur\b|ils\b|\$|€)"
 # Matches single number with optional 3-digit space-separated thousands (e.g. "15 000", "1 250 000.50") or plain digits
 NUM_TOKEN_RE = r"(?:[1-9]\d{0,2}(?:[ \u00a0]\d{3})+|\d+)(?:[.,]\d{1,2})?"
 

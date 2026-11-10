@@ -7,7 +7,7 @@
   <!-- Preconnect to Telegram CDN -->
   <link rel="preconnect" href="https://telegram.org">
   <link rel="dns-prefetch" href="https://telegram.org">
-  <link rel="stylesheet" href="/static/styles.css?v=2.27">
+  <link rel="stylesheet" href="/static/styles.css?v=2.28">
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
@@ -380,6 +380,7 @@
               <option value="USD">$ USD</option>
               <option value="EUR">€ EUR</option>
               <option value="RUB">₽ RUB</option>
+              <option value="ILS">₪ ILS</option>
             </select>
           </label>
         </div>
@@ -444,6 +445,7 @@
               <option value="USD">$ USD</option>
               <option value="EUR">€ EUR</option>
               <option value="RUB">₽ RUB</option>
+              <option value="ILS">₪ ILS</option>
             </select>
           </label>
         </div>
@@ -585,6 +587,7 @@
               <option value="USD">$ USD</option>
               <option value="EUR">€ EUR</option>
               <option value="RUB">₽ RUB</option>
+              <option value="ILS">₪ ILS</option>
             </select>
           </label>
         </div>
@@ -698,11 +701,12 @@
       <div class="settings-body" style="display: flex; flex-direction: column; gap: 20px; padding: 12px 0 8px 0;">
         <div class="settings-section">
           <label class="form-label" style="margin-bottom: 8px;">Основная валюта</label>
-          <div class="currency-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+          <div class="currency-grid">
             <button type="button" class="currency-pill-btn" data-currency="KZT">₸ KZT</button>
             <button type="button" class="currency-pill-btn" data-currency="RUB">₽ RUB</button>
             <button type="button" class="currency-pill-btn" data-currency="USD">$ USD</button>
             <button type="button" class="currency-pill-btn" data-currency="EUR">€ EUR</button>
+            <button type="button" class="currency-pill-btn" data-currency="ILS">₪ ILS</button>
           </div>
           <p class="field-hint" style="font-size: 0.78rem; color: var(--hint-color); margin-top: 6px;">Выбранная валюта используется для отображения баланса и отчётов.</p>
         </div>
@@ -739,6 +743,6 @@
     </button>
   </nav>
 
-  <script src="/static/app.js?v=2.27"></script>
+  <script src="/static/app.js?v=2.28"></script>
 </body>
 </html>
