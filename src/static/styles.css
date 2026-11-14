@@ -781,7 +781,7 @@ input[type="number"] {
   background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
-  z-index: 1100;
+  z-index: 1200;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -2330,5 +2330,40 @@ body.theme-light .sheet-item-amount {
 
   .analytics-selected-cat-name {
     font-size: 0.81rem;
+  }
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tx-filter-btn {
+  max-width: 165px;
+}
+
+.tx-filter-btn-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tx-filter-btn.active-filter {
+  background: rgba(56, 189, 248, 0.24);
+  border-color: var(--link-color, #38bdf8);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.25);
+}
+
+body.theme-light .tx-filter-btn.active-filter {
+  background: rgba(2, 132, 199, 0.18);
+  border-color: #0284c7;
+  box-shadow: 0 0 0 1px rgba(2, 132, 199, 0.2);
+}
+
+@media (max-width: 380px) {
+  .tx-filter-btn {
+    max-width: 126px;
   }
 }

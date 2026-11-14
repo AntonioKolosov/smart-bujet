@@ -7,7 +7,7 @@
   <!-- Preconnect to Telegram CDN -->
   <link rel="preconnect" href="https://telegram.org">
   <link rel="dns-prefetch" href="https://telegram.org">
-  <link rel="stylesheet" href="/static/styles.css?v=2.28">
+  <link rel="stylesheet" href="/static/styles.css?v=2.30">
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
@@ -55,7 +55,13 @@
 
         <div class="toolbar">
           <h2 class="section-title">История транзакций</h2>
-          <button id="refreshBtn" class="refresh-btn" title="Обновить">↻</button>
+          <div class="toolbar-actions">
+            <button type="button" id="txCategoryFilterBtn" class="analytics-cat-btn tx-filter-btn" aria-haspopup="dialog" title="Фильтр по категории">
+              <span id="txCategoryFilterLabel" class="tx-filter-btn-label">Категория</span>
+              <span class="analytics-cat-btn-arrow">▾</span>
+            </button>
+            <button id="refreshBtn" class="refresh-btn" title="Обновить">↻</button>
+          </div>
         </div>
 
         <div id="loader" class="loader-container hidden">
@@ -158,7 +164,13 @@
           <!-- Совместная история операций -->
           <div class="toolbar">
             <h3 class="section-title">Общая история операций</h3>
-            <button id="refreshFamilyBtn" class="refresh-btn" title="Обновить">↻</button>
+            <div class="toolbar-actions">
+              <button type="button" id="familyTxCategoryFilterBtn" class="analytics-cat-btn tx-filter-btn" aria-haspopup="dialog" title="Фильтр по категории">
+                <span id="familyTxCategoryFilterLabel" class="tx-filter-btn-label">Категория</span>
+                <span class="analytics-cat-btn-arrow">▾</span>
+              </button>
+              <button id="refreshFamilyBtn" class="refresh-btn" title="Обновить">↻</button>
+            </div>
           </div>
           <main id="familyTxList" class="tx-list"></main>
 
@@ -623,25 +635,6 @@
     </div>
   </div>
 
-  <!-- Category Picker Bottom Sheet (Шторка выбора категорий) -->
-  <div id="categorySheetOverlay" class="sheet-overlay hidden">
-    <div id="categorySheetContainer" class="sheet-container">
-      <div class="sheet-handle-bar">
-        <div class="sheet-drag-handle"></div>
-      </div>
-      <div class="sheet-header">
-        <h3 class="sheet-title">Выбор категории</h3>
-        <button id="closeCategorySheetBtn" class="close-btn" aria-label="Закрыть">&times;</button>
-      </div>
-      <div class="sheet-search-wrap">
-        <input type="text" id="categorySearchInput" class="sheet-search-input" placeholder="🔍 Найти категорию..." />
-      </div>
-      <div id="categorySheetList" class="category-sheet-grid">
-        <!-- Наполняется динамически -->
-      </div>
-    </div>
-  </div>
-
   <!-- Modal: Add / Edit Fact -->
   <div id="factModal" class="modal-overlay hidden">
     <div class="modal-content">
@@ -658,17 +651,18 @@
           <textarea id="factTextInput" class="form-input" rows="3" placeholder="Например: Пью кофе каждое утро за 1500 тенге, или Зарплата 10-го и 25-го числа" required style="resize: vertical; min-height: 70px;"></textarea>
         </label>
 
-        <label class="form-label">
+        <div class="form-label">
           <span class="form-label-title">Категория (необязательно)</span>
-          <select id="factCategorySelect" class="form-select">
-            <option value="">🤖 Автоматически (AI распределит сам)</option>
-            <option value="goal">🎯 Цель</option>
-            <option value="habit">🔄 Привычка</option>
-            <option value="schedule">📅 Расписание</option>
-            <option value="constraint">⛔ Ограничение</option>
-            <option value="other">💡 Заметка</option>
-          </select>
-        </label>
+          <input type="hidden" id="factCategorySelect" value="" />
+          <div id="factCategoryPickerTrigger" class="category-picker-trigger" tabindex="0" role="button" aria-haspopup="dialog">
+            <div class="category-trigger-left">
+              <span id="selectedFactCategoryDot" class="category-color-dot" style="background-color: #38bdf8;"></span>
+              <span id="selectedFactCategoryIcon" class="category-trigger-icon">🤖</span>
+              <span id="selectedFactCategoryName" class="category-trigger-name">Автоматически (AI распределит сам)</span>
+            </div>
+            <span class="category-trigger-arrow">▾</span>
+          </div>
+        </div>
 
         <div class="modal-actions-row">
           <button type="button" id="cancelFactBtn" class="secondary-btn-modal">Отмена</button>
@@ -687,6 +681,25 @@
           </button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Category Picker Bottom Sheet (Шторка выбора категорий) -->
+  <div id="categorySheetOverlay" class="sheet-overlay hidden">
+    <div id="categorySheetContainer" class="sheet-container">
+      <div class="sheet-handle-bar">
+        <div class="sheet-drag-handle"></div>
+      </div>
+      <div class="sheet-header">
+        <h3 class="sheet-title">Выбор категории</h3>
+        <button id="closeCategorySheetBtn" class="close-btn" aria-label="Закрыть">&times;</button>
+      </div>
+      <div class="sheet-search-wrap">
+        <input type="text" id="categorySearchInput" class="sheet-search-input" placeholder="🔍 Найти категорию..." />
+      </div>
+      <div id="categorySheetList" class="category-sheet-grid">
+        <!-- Наполняется динамически -->
+      </div>
     </div>
   </div>
 
@@ -743,6 +756,6 @@
     </button>
   </nav>
 
-  <script src="/static/app.js?v=2.28"></script>
+  <script src="/static/app.js?v=2.30"></script>
 </body>
 </html>

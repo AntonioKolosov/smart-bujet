@@ -12,6 +12,7 @@ DEFAULT_CATEGORIES = [
     ("Обязательные расходы", CategoryType.expense),
     ("Питомец", CategoryType.expense),
     ("Развлечения", CategoryType.expense),
+    ("Путешествия", CategoryType.expense),
     ("Образование", CategoryType.expense),
     ("Подписки", CategoryType.expense),
     ("Ремонт", CategoryType.expense),

@@ -9,13 +9,15 @@ from src.schemas.transaction import TransactionRead, TransactionCreate, Transact
 from src.services.transaction_service import TransactionService
 from src.models.user import User
 from src.models.transaction import Transaction, TransactionSource
-from src.models.category import CategoryType
+from src.models.category import Category, CategoryType
 
 router = APIRouter()
 
 @router.get("/", response_model=List[TransactionRead])
 async def list_transactions(
     include_family: bool = Query(False, description="Include family group transactions"),
+    category_id: Optional[int] = Query(None, description="Filter by category ID"),
+    category_name: Optional[str] = Query(None, description="Filter by category name"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
@@ -28,6 +30,10 @@ async def list_transactions(
             Transaction.user_id == current_user.id,
             Transaction.family_group_id == current_user.family_group_id
         )]
+    if category_id is not None:
+        conditions.append(Transaction.category_id == category_id)
+    if category_name and category_name.strip():
+        conditions.append(Transaction.category.has(Category.name.ilike(category_name.strip())))
 
     query = (
         select(Transaction)

@@ -117,6 +117,10 @@
   const factIdInput = document.getElementById('factIdInput');
   const factTextInput = document.getElementById('factTextInput');
   const factCategorySelect = document.getElementById('factCategorySelect');
+  const factCategoryPickerTrigger = document.getElementById('factCategoryPickerTrigger');
+  const selectedFactCategoryDot = document.getElementById('selectedFactCategoryDot');
+  const selectedFactCategoryIcon = document.getElementById('selectedFactCategoryIcon');
+  const selectedFactCategoryName = document.getElementById('selectedFactCategoryName');
   const saveFactBtn = document.getElementById('saveFactBtn');
   const deleteFactRow = document.getElementById('deleteFactRow');
   const deleteFactBtn = document.getElementById('deleteFactBtn');
@@ -184,6 +188,11 @@
   const errorEl = document.getElementById('errorMessage');
   const emptyEl = document.getElementById('emptyMessage');
   const refreshBtn = document.getElementById('refreshBtn');
+  const txCategoryFilterBtn = document.getElementById('txCategoryFilterBtn');
+  const txCategoryFilterLabel = document.getElementById('txCategoryFilterLabel');
+  const familyTxCategoryFilterBtn = document.getElementById('familyTxCategoryFilterBtn');
+  const familyTxCategoryFilterLabel = document.getElementById('familyTxCategoryFilterLabel');
+  const categorySearchWrapEl = document.querySelector('#categorySheetContainer .sheet-search-wrap');
 
   // DOM Elements - Assets Tab
   const totalNetWorthEl = document.getElementById('totalNetWorth');
@@ -545,6 +554,10 @@
     txListEl.appendChild(container);
   }
 
+  let selectedTxCategoryFilter = null;
+  let selectedFamilyTxCategoryFilter = null;
+  let lastLoadedFamilyTxs = [];
+
   async function fetchTransactions(loadMore = false) {
     if (isFetchingTx) return;
     isFetchingTx = true;
@@ -560,7 +573,10 @@
     }
 
     try {
-      const res = await fetch(`/api/v1/transactions/?limit=${TX_LIMIT}&offset=${currentTxOffset}`, { headers: getHeaders() });
+      const catQuery = selectedTxCategoryFilter
+        ? `&category_name=${encodeURIComponent(selectedTxCategoryFilter)}`
+        : '';
+      const res = await fetch(`/api/v1/transactions/?limit=${TX_LIMIT}&offset=${currentTxOffset}${catQuery}`, { headers: getHeaders() });
       if (!res.ok) {
         if (res.status === 401) {
           throw new Error('Требуется авторизация через Telegram MiniApp.');
@@ -572,10 +588,12 @@
 
       if (!loadMore) {
         txListEl.innerHTML = '';
-        try {
-          const uid = getUserId();
-          safeSetStorage('sb_cached_txs_' + uid, JSON.stringify(transactions));
-        } catch (_) {}
+        if (!selectedTxCategoryFilter) {
+          try {
+            const uid = getUserId();
+            safeSetStorage('sb_cached_txs_' + uid, JSON.stringify(transactions));
+          } catch (_) {}
+        }
       }
 
       renderTransactions(transactions, loadMore);
@@ -594,6 +612,15 @@
   function renderTransactions(transactions, append = false) {
     if (!append) {
       if (!transactions || transactions.length === 0) {
+        const emptyTitleEl = emptyEl ? emptyEl.querySelector('.empty-title') : null;
+        const emptyDescEl = emptyEl ? emptyEl.querySelector('.empty-desc') : null;
+        if (selectedTxCategoryFilter) {
+          if (emptyTitleEl) emptyTitleEl.textContent = `В категории «${selectedTxCategoryFilter}» операций нет`;
+          if (emptyDescEl) emptyDescEl.textContent = 'Выберите «Все категории» в фильтре, чтобы показать всю историю';
+        } else {
+          if (emptyTitleEl) emptyTitleEl.textContent = 'Транзакций пока нет';
+          if (emptyDescEl) emptyDescEl.textContent = 'Отправьте боту текст, голосовое сообщение или фото чека';
+        }
         emptyEl.classList.remove('hidden');
         txListEl.innerHTML = '';
         return;
@@ -1257,6 +1284,7 @@
     'Продукты': { icon: '🛒', color: '#22c55e' },
     'Транспорт': { icon: '🚕', color: '#38bdf8' },
     'Развлечения': { icon: '🎉', color: '#a855f7' },
+    'Путешествия': { icon: '✈️', color: '#0ea5e9' },
     'Здоровье': { icon: '💊', color: '#ec4899' },
     'Обязательные расходы': { icon: '⚡', color: '#eab308' },
     'Подписки': { icon: '📱', color: '#6366f1' },
@@ -1270,7 +1298,10 @@
     'Погашение кредита': { icon: '💳', color: '#ef4444' },
     'Денежный перевод': { icon: '💸', color: '#8b5cf6' },
     'Зарплата': { icon: '💰', color: '#10b981' },
-    'Проценты по вкладу': { icon: '📈', color: '#3b82f6' }
+    'Проценты по вкладу': { icon: '📈', color: '#3b82f6' },
+    'Депозит и вклады': { icon: '🏦', color: '#0ea5e9' },
+    'Снятие с депозита': { icon: '🏧', color: '#f59e0b' },
+    'Получение кредита': { icon: '🏦', color: '#a855f7' }
   };
 
   function getCategoryMeta(name) {
@@ -1296,6 +1327,7 @@
       title: 'Выбор категории',
       categories: currentModalCategories,
       autoFocus: true,
+      showSearch: true,
       showAmount: false,
       isSelected: (cat) => cat.id === Number(editTxCategoryValue?.value),
       onSelect: (cat) => setCategoryPickerSelection(cat.id, cat.name)
@@ -1309,10 +1341,14 @@
     if (categorySheetTitleEl) {
       categorySheetTitleEl.textContent = activeCategorySheetConfig.title || 'Выбор категории';
     }
+    const showSearch = activeCategorySheetConfig.showSearch !== false;
+    if (categorySearchWrapEl) {
+      categorySearchWrapEl.classList.toggle('hidden', !showSearch);
+    }
     renderCategorySheetList(activeCategorySheetConfig.categories || []);
     if (categorySearchInput) categorySearchInput.value = '';
     categorySheetOverlay.classList.remove('hidden');
-    if (activeCategorySheetConfig.autoFocus && categorySearchInput) {
+    if (showSearch && activeCategorySheetConfig.autoFocus && categorySearchInput) {
       setTimeout(() => categorySearchInput.focus(), 80);
     }
   }
@@ -1401,6 +1437,100 @@
     const categories = await res.json();
     cachedCategoriesByType[normType] = categories;
     return categories;
+  }
+
+  async function fetchAllUniqueCategories() {
+    if (!cachedCategoriesByType.all) {
+      try {
+        const res = await fetch('/api/v1/categories/', { headers: getHeaders() });
+        if (res.ok) {
+          cachedCategoriesByType.all = await res.json();
+        }
+      } catch (_) {}
+    }
+    const rawList = cachedCategoriesByType.all || Object.keys(CATEGORY_META).map((name, i) => ({ id: i + 1, name }));
+    const seen = new Set();
+    const unique = [];
+    rawList.forEach(c => {
+      const name = (c.name || '').trim();
+      if (!name || seen.has(name.toLowerCase())) return;
+      seen.add(name.toLowerCase());
+      const meta = getCategoryMeta(name);
+      unique.push({
+        id: c.id || name,
+        name,
+        icon: meta.icon,
+        color: meta.color
+      });
+    });
+    return unique;
+  }
+
+  function updateTxFilterButtonUI(btnEl, labelEl, activeCatName) {
+    if (!btnEl || !labelEl) return;
+    if (activeCatName) {
+      const meta = getCategoryMeta(activeCatName);
+      labelEl.textContent = `${meta.icon} ${activeCatName}`;
+      btnEl.classList.add('active-filter');
+    } else {
+      labelEl.textContent = 'Категория';
+      btnEl.classList.remove('active-filter');
+    }
+  }
+
+  async function openTxCategoryFilterPicker() {
+    const cats = await fetchAllUniqueCategories();
+    const items = [
+      { id: '', name: 'Все категории', icon: '📋', color: '#38bdf8' },
+      ...cats
+    ];
+    openCategorySheet({
+      title: 'Фильтр операций',
+      categories: items,
+      autoFocus: false,
+      showSearch: true,
+      showAmount: false,
+      isSelected: (cat) => {
+        if (!selectedTxCategoryFilter) return cat.id === '';
+        return cat.name === selectedTxCategoryFilter;
+      },
+      onSelect: (cat) => {
+        selectedTxCategoryFilter = cat.id === '' ? null : cat.name;
+        updateTxFilterButtonUI(txCategoryFilterBtn, txCategoryFilterLabel, selectedTxCategoryFilter);
+        fetchTransactions(false);
+      }
+    });
+  }
+
+  async function openFamilyTxCategoryFilterPicker() {
+    const cats = await fetchAllUniqueCategories();
+    const items = [
+      { id: '', name: 'Все категории', icon: '📋', color: '#38bdf8' },
+      ...cats
+    ];
+    openCategorySheet({
+      title: 'Фильтр семейных операций',
+      categories: items,
+      autoFocus: false,
+      showSearch: true,
+      showAmount: false,
+      isSelected: (cat) => {
+        if (!selectedFamilyTxCategoryFilter) return cat.id === '';
+        return cat.name === selectedFamilyTxCategoryFilter;
+      },
+      onSelect: (cat) => {
+        selectedFamilyTxCategoryFilter = cat.id === '' ? null : cat.name;
+        updateTxFilterButtonUI(familyTxCategoryFilterBtn, familyTxCategoryFilterLabel, selectedFamilyTxCategoryFilter);
+        renderFamilyTransactions(lastLoadedFamilyTxs);
+      }
+    });
+  }
+
+  if (txCategoryFilterBtn) {
+    txCategoryFilterBtn.addEventListener('click', openTxCategoryFilterPicker);
+  }
+  if (familyTxCategoryFilterBtn) {
+    familyTxCategoryFilterBtn.addEventListener('click', openFamilyTxCategoryFilterPicker);
   }
 
   async function openEditModal(tx) {
@@ -1864,7 +1994,8 @@
       const res = await fetch('/api/v1/family/transactions?limit=60', { headers: getHeaders() });
       if (!res.ok) return;
       const txs = await res.json();
-      renderFamilyTransactions(txs);
+      lastLoadedFamilyTxs = Array.isArray(txs) ? txs : [];
+      renderFamilyTransactions(lastLoadedFamilyTxs);
     } catch (e) {
       console.error('Family transactions error:', e);
     }
@@ -1873,16 +2004,26 @@
   function renderFamilyTransactions(transactions) {
     if (!familyTxListEl) return;
     familyTxListEl.innerHTML = '';
-    if (!transactions || !transactions.length) {
+    const filtered = selectedFamilyTxCategoryFilter
+      ? (transactions || []).filter(tx => (tx.category_name || 'Общее').toLowerCase() === selectedFamilyTxCategoryFilter.toLowerCase())
+      : (transactions || []);
+    if (!filtered || !filtered.length) {
+      const emptyTitle = selectedFamilyTxCategoryFilter
+        ? `В категории «${escapeHtml(selectedFamilyTxCategoryFilter)}» операций нет`
+        : 'Семейных транзакций пока нет';
+      const emptyDesc = selectedFamilyTxCategoryFilter
+        ? 'Выберите «Все категории» в фильтре, чтобы показать всю историю'
+        : 'Любая трата или доход партнеров появится здесь автоматически';
       familyTxListEl.innerHTML = `
         <div class="empty-banner" style="padding: 30px 20px;">
           <div class="empty-icon">🧾</div>
-          <p class="empty-title">Семейных транзакций пока нет</p>
-          <span class="empty-desc">Любая трата или доход партнеров появится здесь автоматически</span>
+          <p class="empty-title">${emptyTitle}</p>
+          <span class="empty-desc">${emptyDesc}</span>
         </div>
       `;
       return;
     }
+    transactions = filtered;
 
     const groups = {};
     transactions.forEach(tx => {
@@ -2460,6 +2601,46 @@
     factsListEl.appendChild(fragment);
   }
 
+  const FACT_CATEGORY_OPTIONS = [
+    { id: '', name: 'Автоматически (AI распределит сам)', icon: '🤖', color: '#38bdf8' },
+    { id: 'goal', name: 'Цель', icon: '🎯', color: '#34d399' },
+    { id: 'habit', name: 'Привычка', icon: '🔄', color: '#38bdf8' },
+    { id: 'schedule', name: 'Расписание', icon: '📅', color: '#fbbf24' },
+    { id: 'constraint', name: 'Ограничение', icon: '⛔', color: '#f87171' },
+    { id: 'other', name: 'Заметка', icon: '💡', color: '#c084fc' }
+  ];
+
+  function setFactCategorySelection(catCode) {
+    const normalized = catCode || '';
+    if (factCategorySelect) factCategorySelect.value = normalized;
+    const opt = FACT_CATEGORY_OPTIONS.find(o => o.id === normalized) || FACT_CATEGORY_OPTIONS[0];
+    if (selectedFactCategoryName) selectedFactCategoryName.textContent = opt.name;
+    if (selectedFactCategoryIcon) selectedFactCategoryIcon.textContent = opt.icon;
+    if (selectedFactCategoryDot) selectedFactCategoryDot.style.backgroundColor = opt.color;
+  }
+
+  function openFactCategoryPicker() {
+    openCategorySheet({
+      title: 'Категория факта',
+      categories: FACT_CATEGORY_OPTIONS,
+      autoFocus: false,
+      showSearch: false,
+      showAmount: false,
+      isSelected: (cat) => String(cat.id || '') === String(factCategorySelect?.value || ''),
+      onSelect: (cat) => setFactCategorySelection(cat.id)
+    });
+  }
+
+  if (factCategoryPickerTrigger) {
+    factCategoryPickerTrigger.addEventListener('click', openFactCategoryPicker);
+    factCategoryPickerTrigger.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openFactCategoryPicker();
+      }
+    });
+  }
+
   function openFactModal(fact = null) {
     if (!factModal) return;
     if (factModalError) {
@@ -2471,13 +2652,13 @@
       if (factModalTitle) factModalTitle.textContent = 'Редактировать факт';
       if (factIdInput) factIdInput.value = fact.id;
       if (factTextInput) factTextInput.value = fact.fact_text || '';
-      if (factCategorySelect) factCategorySelect.value = fact.category || '';
+      setFactCategorySelection(fact.category || '');
       deleteFactRow?.classList.remove('hidden');
     } else {
       if (factModalTitle) factModalTitle.textContent = 'Новый факт о себе';
       if (factIdInput) factIdInput.value = '';
       if (factTextInput) factTextInput.value = '';
-      if (factCategorySelect) factCategorySelect.value = '';
+      setFactCategorySelection('');
       deleteFactRow?.classList.add('hidden');
     }
 
@@ -2489,6 +2670,7 @@
     if (!factModal) return;
     factModal.classList.add('hidden');
     factForm?.reset();
+    setFactCategorySelection('');
   }
 
   async function deleteFactDirect(fact) {
