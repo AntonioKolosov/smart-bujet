@@ -244,8 +244,8 @@ class TestSingleCategoryMonthlyAnalytics(unittest.IsolatedAsyncioTestCase):
         with open(os.path.join(base_dir, "styles.css"), "r", encoding="utf-8") as f:
             css = f.read()
 
-        self.assertIn("styles.css?v=2.29", html)
-        self.assertIn("app.js?v=2.29", html)
+        self.assertIn("styles.css?v=2.30", html)
+        self.assertIn("app.js?v=2.30", html)
         self.assertEqual(html.count('<option value="ILS">₪ ILS</option>'), 3)
         self.assertIn('data-currency="ILS">₪ ILS</button>', html)
         self.assertIn("ILS: '₪'", js)
@@ -298,6 +298,10 @@ class TestSingleCategoryMonthlyAnalytics(unittest.IsolatedAsyncioTestCase):
         self.assertIn("FACT_CATEGORY_OPTIONS", js)
         self.assertIn("openFactCategoryPicker", js)
         self.assertIn("openTxCategoryFilterPicker", js)
+        self.assertIn("Путешествия", js)
+        from src.services.category_service import DEFAULT_CATEGORIES
+        from src.models.category import CategoryType
+        self.assertIn(("Путешествия", CategoryType.expense), DEFAULT_CATEGORIES)
         self.assertIn("category_name: Optional[str] = Query(None", tx_api)
         self.assertIn("category_id: Optional[int] = Query(None", tx_api)
 
